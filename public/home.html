@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home - The Wire</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>The Wire</h1>
+    <div id="user-info"></div>
+    <div id="logout-container" style="margin-top: 2rem;">
+      <button id="logout-btn">Log Out</button>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    // Check if authenticated
+    if (!auth.isAuthenticated()) {
+      window.location.href = '/login';
+    }
+
+    // Load user info
+    async function loadUserInfo() {
+      try {
+        const response = await auth.me();
+        if (response.success) {
+          document.getElementById('user-info').innerHTML = `
+            <p>Logged in as: <strong>@${response.data.handle}</strong></p>
+            <p>Email: ${response.data.email}</p>
+            <p>User ID: ${response.data.id}</p>
+          `;
+        }
+      } catch (error) {
+        console.error('Error loading user info:', error);
+        window.location.href = '/login';
+      }
+    }
+
+    // Logout handler
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      try {
+        await auth.logout();
+        window.location.href = '/';
+      } catch (error) {
+        console.error('Logout error:', error);
+        window.location.href = '/';
+      }
+    });
+
+    loadUserInfo();
+  </script>
+</body>
+</html>

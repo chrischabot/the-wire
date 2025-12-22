@@ -1,0 +1,81 @@
+name = "the-wire"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Development settings
+[dev]
+port = 8787
+local_protocol = "http"
+
+# KV Namespaces
+[[kv_namespaces]]
+binding = "USERS_KV"
+id = "users-kv-id"
+preview_id = "users-kv-preview-id"
+
+[[kv_namespaces]]
+binding = "POSTS_KV"
+id = "posts-kv-id"
+preview_id = "posts-kv-preview-id"
+
+[[kv_namespaces]]
+binding = "SESSIONS_KV"
+id = "sessions-kv-id"
+preview_id = "sessions-kv-preview-id"
+
+[[kv_namespaces]]
+binding = "FEEDS_KV"
+id = "feeds-kv-id"
+preview_id = "feeds-kv-preview-id"
+
+# R2 Buckets
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "the-wire-media"
+preview_bucket_name = "the-wire-media-preview"
+
+# Durable Objects
+[durable_objects]
+bindings = [
+  { name = "USER_DO", class_name = "UserDO" },
+  { name = "POST_DO", class_name = "PostDO" },
+  { name = "FEED_DO", class_name = "FeedDO" },
+  { name = "COUNTER_DO", class_name = "CounterDO" },
+  { name = "WEBSOCKET_DO", class_name = "WebSocketDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["UserDO", "PostDO", "FeedDO", "CounterDO", "WebSocketDO"]
+
+# Queues
+[[queues.producers]]
+binding = "FANOUT_QUEUE"
+queue = "fanout-queue"
+
+[[queues.consumers]]
+queue = "fanout-queue"
+max_batch_size = 100
+max_batch_timeout = 30
+
+# Cron Triggers
+[triggers]
+crons = [
+  "*/15 * * * *",  # Every 15 minutes - update FoF rankings
+  "0 * * * *",     # Every hour - cleanup old feed entries
+  "0 0 * * *"      # Daily - compact KV storage
+]
+
+# Environment Variables
+[vars]
+ENVIRONMENT = "development"
+JWT_EXPIRY_HOURS = "24"
+MAX_NOTE_LENGTH = "280"
+FEED_PAGE_SIZE = "20"
+
+# Production overrides
+[env.production]
+name = "the-wire-production"
+[env.production.vars]
+ENVIRONMENT = "production"

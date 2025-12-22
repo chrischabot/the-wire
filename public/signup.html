@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up - The Wire</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="auth-container">
+    <h1 class="text-center">Join The Wire</h1>
+    <p class="text-center mb-1" style="color: var(--text-muted);">
+      Create your account to start sharing notes
+    </p>
+
+    <form id="signup-form">
+      <div class="form-group">
+        <label for="handle">Handle</label>
+        <input 
+          type="text" 
+          id="handle" 
+          name="handle" 
+          placeholder="username"
+          required
+          pattern="[a-zA-Z0-9_]{3,15}"
+          minlength="3"
+          maxlength="15"
+        >
+        <small class="text-muted">3-15 characters, letters, numbers, and underscores</small>
+      </div>
+
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input 
+          type="email" 
+          id="email" 
+          name="email" 
+          placeholder="you@example.com"
+          required
+        >
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input 
+          type="password" 
+          id="password" 
+          name="password" 
+          placeholder="••••••••"
+          required
+          minlength="8"
+        >
+        <small class="text-muted">At least 8 characters with uppercase, lowercase, and number</small>
+      </div>
+
+      <div id="error-message" class="error"></div>
+      <div id="success-message" class="success"></div>
+
+      <button type="submit" id="submit-btn">Create Account</button>
+    </form>
+
+    <p class="text-center mt-1">
+      Already have an account? 
+      <a href="/login" class="link">Log in</a>
+    </p>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const form = document.getElementById('signup-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const errorMsg = document.getElementById('error-message');
+    const successMsg = document.getElementById('success-message');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      errorMsg.textContent = '';
+      successMsg.textContent = '';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating account...';
+
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const handle = document.getElementById('handle').value;
+
+      try {
+        const response = await auth.signup(email, password, handle);
+        
+        if (response.success) {
+          successMsg.textContent = 'Account created! Redirecting...';
+          setTimeout(() => {
+            window.location.href = '/home';
+          }, 1000);
+        }
+      } catch (error) {
+        errorMsg.textContent = error.message;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Account';
+      }
+    });
+  </script>
+</body>
+</html>
