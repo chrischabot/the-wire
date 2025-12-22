@@ -356,88 +356,6 @@ app.get('/login', (c) => {
   `);
 });
 
-// Explore/trending page
-app.get('/explore', (c) => {
-  return c.html(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Explore / The Wire</title>
-  <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body>
-  <div class="twitter-layout">
-    <!-- Left Sidebar -->
-    <div class="sidebar-left">
-      <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
-      </div>
-      
-      <a href="/home" class="nav-item">
-        <span class="nav-icon">🏠</span>
-        <span>Home</span>
-      </a>
-      <a href="/explore" class="nav-item active">
-        <span class="nav-icon">🔍</span>
-        <span>Explore</span>
-      </a>
-      <a href="/notifications" class="nav-item">
-        <span class="nav-icon">🔔</span>
-        <span>Notifications</span>
-      </a>
-      <a href="/u/me" class="nav-item">
-        <span class="nav-icon">👤</span>
-        <span>Profile</span>
-      </a>
-      <a href="/settings" class="nav-item">
-        <span class="nav-icon">⚙️</span>
-        <span>Settings</span>
-      </a>
-      
-      <button class="post-button">Post</button>
-    </div>
-
-    <!-- Main Content -->
-    <div class="main-content">
-      <div class="page-header">
-        <h2>Explore</h2>
-      </div>
-
-      <div class="tabs">
-        <button class="tab active">For you</button>
-        <button class="tab">Trending</button>
-        <button class="tab">News</button>
-        <button class="tab">Sports</button>
-      </div>
-
-      <div id="trending-content" style="padding: 16px;">
-        <div class="empty-state">Trending content will be available soon</div>
-      </div>
-    </div>
-
-    <!-- Right Sidebar -->
-    <div class="sidebar-right">
-      <div class="search-box">
-        <input type="text" class="search-input" placeholder="Search">
-      </div>
-      
-      <div class="widget-box">
-        <div class="widget-header">What's happening</div>
-        <div class="widget-item">
-          <div class="widget-item-meta">Trending</div>
-          <div class="widget-item-title">Example Trend</div>
-          <div class="widget-item-meta">1,234 posts</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-  `);
-});
-
 // Home page
 app.get('/home', (c) => {
   return c.html(`
@@ -469,7 +387,7 @@ app.get('/home', (c) => {
         <span class="nav-icon">🔔</span>
         <span>Notifications</span>
       </a>
-      <a href="/u/me" class="nav-item">
+      <a href="/u/${c.get('userHandle') || 'me'}" class="nav-item">
         <span class="nav-icon">👤</span>
         <span>Profile</span>
       </a>
@@ -485,6 +403,11 @@ app.get('/home', (c) => {
     <div class="main-content">
       <div class="page-header">
         <h2>Home</h2>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active">For you</button>
+        <button class="tab">Following</button>
       </div>
 
       <div class="compose-box">
@@ -733,166 +656,6 @@ app.get('/home', (c) => {
 
     loadTimeline();
     loadUserProfile();
-  </script>
-</body>
-</html>
-  `);
-});
-
-// Notifications page
-app.get('/notifications', (c) => {
-  return c.html(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Notifications / The Wire</title>
-  <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body>
-  <div class="twitter-layout">
-    <!-- Left Sidebar -->
-    <div class="sidebar-left">
-      <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
-      </div>
-      
-      <a href="/home" class="nav-item">
-        <span class="nav-icon">🏠</span>
-        <span>Home</span>
-      </a>
-      <a href="/explore" class="nav-item">
-        <span class="nav-icon">🔍</span>
-        <span>Explore</span>
-      </a>
-      <a href="/notifications" class="nav-item active">
-        <span class="nav-icon">🔔</span>
-        <span>Notifications</span>
-      </a>
-      <a href="/u/me" class="nav-item">
-        <span class="nav-icon">👤</span>
-        <span>Profile</span>
-      </a>
-      <a href="/settings" class="nav-item">
-        <span class="nav-icon">⚙️</span>
-        <span>Settings</span>
-      </a>
-      
-      <button class="post-button">Post</button>
-    </div>
-
-    <!-- Main Content -->
-    <div class="main-content">
-      <div class="page-header">
-        <h2>Notifications</h2>
-      </div>
-
-      <div class="tabs">
-        <button class="tab active">All</button>
-        <button class="tab">Mentions</button>
-      </div>
-
-      <div id="notifications-list">
-        <div class="empty-state">Loading notifications...</div>
-      </div>
-    </div>
-
-    <!-- Right Sidebar -->
-    <div class="sidebar-right">
-      <div class="search-box">
-        <input type="text" class="search-input" placeholder="Search">
-      </div>
-    </div>
-  </div>
-
-  <script src="/js/api.js"></script>
-  <script>
-    if (!auth.isAuthenticated()) {
-      window.location.href = '/login';
-    }
-
-    async function loadNotifications() {
-      try {
-        const response = await notifications.getNotifications(null, 20);
-        
-        if (response.success && response.data.notifications.length > 0) {
-          const notifsList = document.getElementById('notifications-list');
-          notifsList.innerHTML = response.data.notifications.map(notif => {
-            const date = new Date(notif.createdAt);
-            const timeStr = formatTimeAgo(date);
-            const readClass = notif.read ? '' : ' style="background: rgba(29, 155, 240, 0.05);"';
-            
-            let icon = '🔔';
-            let action = '';
-            if (notif.type === 'like') {
-              icon = '❤️';
-              action = 'liked your post';
-            } else if (notif.type === 'reply') {
-              icon = '💬';
-              action = 'replied to your post';
-            } else if (notif.type === 'follow') {
-              icon = '👤';
-              action = 'followed you';
-            } else if (notif.type === 'mention') {
-              icon = '@';
-              action = 'mentioned you';
-            } else if (notif.type === 'repost') {
-              icon = '🔁';
-              action = 'reposted your post';
-            }
-            
-            const avatarHtml = notif.actorAvatarUrl
-              ? '<img src="' + notif.actorAvatarUrl + '" class="avatar avatar-sm" alt="' + notif.actorDisplayName + '">'
-              : '<div class="avatar avatar-sm" style="background: #1D9BF0;"></div>';
-            
-            return '<div class="post-card" onclick="markAsRead(\\'' + notif.id + '\\'); if (\\'' + (notif.postId || '') + '\\') window.location.href=\\'/post/' + (notif.postId || '') + '\\';"' + readClass + '>' +
-              '<div class="post-header">' +
-                '<span style="font-size: 20px; margin-right: 12px;">' + icon + '</span>' +
-                '<div class="post-body">' +
-                  '<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">' +
-                    avatarHtml +
-                    '<a href="/u/' + notif.actorHandle + '" class="post-author" onclick="event.stopPropagation()">' + notif.actorDisplayName + '</a>' +
-                  '</div>' +
-                  '<div style="color: #536471; font-size: 15px;">' + action + ' · ' + timeStr + '</div>' +
-                  (notif.content ? '<div class="post-content" style="margin-top: 8px;">' + escapeHtml(notif.content) + '</div>' : '') +
-                '</div>' +
-              '</div>' +
-            '</div>';
-          }).join('');
-        } else {
-          document.getElementById('notifications-list').innerHTML = '<div class="empty-state">No notifications yet</div>';
-        }
-      } catch (error) {
-        console.error('Error loading notifications:', error);
-        document.getElementById('notifications-list').innerHTML = '<div class="error">Error loading notifications</div>';
-      }
-    }
-
-    async function markAsRead(notificationId) {
-      try {
-        await notifications.markRead(notificationId);
-      } catch (error) {
-        console.error('Error marking notification as read:', error);
-      }
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    function formatTimeAgo(date) {
-      const seconds = Math.floor((new Date() - date) / 1000);
-      if (seconds < 60) return seconds + 's';
-      if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
-      if (seconds < 86400) return Math.floor(seconds / 3600) + 'h';
-      if (seconds < 604800) return Math.floor(seconds / 86400) + 'd';
-      return date.toLocaleDateString();
-    }
-
-    loadNotifications();
   </script>
 </body>
 </html>
@@ -1219,45 +982,6 @@ app.get('/post/:id', (c) => {
   `);
 });
 
-// Redirect /u/me to actual user profile
-app.get('/u/me', async (c) => {
-  const authHeader = c.req.header('Authorization');
-  
-  if (!authHeader) {
-    return c.html(`
-      <script>
-        const token = localStorage.getItem('auth_token');
-        const handle = localStorage.getItem('user_handle');
-        if (handle) {
-          window.location.href = '/u/' + handle;
-        } else {
-          window.location.href = '/login';
-        }
-      </script>
-    `);
-  }
-  
-  const { extractToken } = await import('./utils/jwt');
-  const token = extractToken(authHeader);
-  
-  if (token) {
-    const { verifyToken } = await import('./utils/jwt');
-    const { getJwtSecret } = await import('./middleware/auth');
-    
-    try {
-      const secret = getJwtSecret(c.env);
-      const payload = await verifyToken(token, secret);
-      
-      if (payload && payload.handle) {
-        return c.redirect(`/u/${payload.handle}`);
-      }
-    } catch (error) {
-    }
-  }
-  
-  return c.redirect('/login');
-});
-
 // Settings page
 app.get('/settings', (c) => {
   return c.html(`
@@ -1266,154 +990,66 @@ app.get('/settings', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Settings / The Wire</title>
+  <title>Settings - The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
-  <style>
-    .settings-section {
-      border-bottom: 1px solid var(--twitter-border);
-      padding: 20px 16px;
-    }
-    .settings-section h3 {
-      font-size: 20px;
-      font-weight: 700;
-      margin-bottom: 20px;
-      color: var(--twitter-black);
-    }
-    .settings-section .form-group {
-      margin-bottom: 20px;
-    }
-    .settings-section label {
-      display: block;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--twitter-dark-gray);
-      margin-bottom: 8px;
-    }
-    .settings-section input[type="text"],
-    .settings-section input[type="url"],
-    .settings-section textarea {
-      width: 100%;
-      padding: 12px;
-      border: 1px solid var(--twitter-border);
-      border-radius: 4px;
-      font-family: inherit;
-      font-size: 15px;
-      color: var(--twitter-black);
-    }
-    .settings-section input:focus,
-    .settings-section textarea:focus {
-      outline: none;
-      border-color: var(--twitter-blue);
-    }
-    .settings-section textarea {
-      resize: vertical;
-    }
-    .banner {
-      width: 100%;
-      height: 200px;
-      background: var(--twitter-light-gray);
-      border-radius: 8px;
-      margin-bottom: 16px;
-      background-size: cover;
-      background-position: center;
-    }
-  </style>
 </head>
 <body>
-  <div class="twitter-layout">
-    <!-- Left Sidebar -->
-    <div class="sidebar-left">
-      <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
-      </div>
-      
-      <a href="/home" class="nav-item">
-        <span class="nav-icon">🏠</span>
-        <span>Home</span>
-      </a>
-      <a href="/explore" class="nav-item">
-        <span class="nav-icon">🔍</span>
-        <span>Explore</span>
-      </a>
-      <a href="/notifications" class="nav-item">
-        <span class="nav-icon">🔔</span>
-        <span>Notifications</span>
-      </a>
-      <a href="/u/me" class="nav-item">
-        <span class="nav-icon">👤</span>
-        <span>Profile</span>
-      </a>
-      <a href="/settings" class="nav-item active">
-        <span class="nav-icon">⚙️</span>
-        <span>Settings</span>
-      </a>
-      
-      <button class="post-button">Post</button>
-    </div>
-
-    <!-- Main Content -->
-    <div class="main-content">
-      <div class="page-header">
-        <h2>Settings</h2>
-      </div>
-
-      <div class="settings-section">
-        <h3>Profile</h3>
-        <form id="profile-form">
-          <div class="form-group">
-            <label for="displayName">Display Name</label>
-            <input type="text" id="displayName" maxlength="50">
-          </div>
-
-          <div class="form-group">
-            <label for="bio">Bio</label>
-            <textarea id="bio" maxlength="160" rows="3"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="location">Location</label>
-            <input type="text" id="location" maxlength="50">
-          </div>
-
-          <div class="form-group">
-            <label for="website">Website</label>
-            <input type="url" id="website">
-          </div>
-
-          <button type="submit" class="btn-primary">Save Profile</button>
-        </form>
-        <div id="profile-success" class="success"></div>
-        <div id="profile-error" class="error"></div>
-      </div>
-
-      <div class="settings-section">
-        <h3>Avatar</h3>
-        <div id="current-avatar" class="avatar avatar-lg" style="margin-bottom: 16px;"></div>
-        <input type="file" id="avatar-file" accept="image/*" style="margin-bottom: 16px;">
-        <button id="upload-avatar-btn" class="btn-secondary">Upload Avatar</button>
-        <div id="avatar-success" class="success"></div>
-        <div id="avatar-error" class="error"></div>
-      </div>
-
-      <div class="settings-section">
-        <h3>Banner</h3>
-        <div id="current-banner" class="banner"></div>
-        <input type="file" id="banner-file" accept="image/*" style="margin-bottom: 16px;">
-        <button id="upload-banner-btn" class="btn-secondary">Upload Banner</button>
-        <div id="banner-success" class="success"></div>
-        <div id="banner-error" class="error"></div>
-      </div>
-
-      <div class="settings-section">
-        <button onclick="logout()" class="btn-secondary">Log Out</button>
+  <div class="container">
+    <div class="nav-bar">
+      <h1 style="margin: 0;">The Wire</h1>
+      <div class="nav-links">
+        <button onclick="window.location.href='/home'">Home</button>
+        <button id="logout-btn">Log Out</button>
       </div>
     </div>
 
-    <!-- Right Sidebar -->
-    <div class="sidebar-right">
-      <div class="search-box">
-        <input type="text" class="search-input" placeholder="Search">
-      </div>
+    <h2>Settings</h2>
+    
+    <div class="settings-section">
+      <h3>Profile</h3>
+      <form id="profile-form">
+        <div class="form-group">
+          <label for="displayName">Display Name</label>
+          <input type="text" id="displayName" maxlength="50">
+        </div>
+
+        <div class="form-group">
+          <label for="bio">Bio</label>
+          <textarea id="bio" maxlength="160" rows="3"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="location">Location</label>
+          <input type="text" id="location" maxlength="50">
+        </div>
+
+        <div class="form-group">
+          <label for="website">Website</label>
+          <input type="url" id="website">
+        </div>
+
+        <button type="submit" id="save-profile-btn">Save Profile</button>
+      </form>
+      <div id="profile-success" class="success"></div>
+      <div id="profile-error" class="error"></div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Avatar</h3>
+      <div id="current-avatar" class="avatar avatar-lg" style="margin-bottom: 1rem;"></div>
+      <input type="file" id="avatar-file" accept="image/*" style="margin-bottom: 1rem;">
+      <button id="upload-avatar-btn">Upload Avatar</button>
+      <div id="avatar-success" class="success"></div>
+      <div id="avatar-error" class="error"></div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Banner</h3>
+      <div id="current-banner" class="banner" style="margin-bottom: 1rem;"></div>
+      <input type="file" id="banner-file" accept="image/*" style="margin-bottom: 1rem;">
+      <button id="upload-banner-btn">Upload Banner</button>
+      <div id="banner-success" class="success"></div>
+      <div id="banner-error" class="error"></div>
     </div>
   </div>
 
@@ -1440,13 +1076,13 @@ app.get('/settings', (c) => {
             
             if (currentUser.avatarUrl) {
               document.getElementById('current-avatar').style.backgroundImage = 
-                'url(' + currentUser.avatarUrl + ')';
+                'url(' + currentUser.avatarUrl + '?width=128&quality=80)';
               document.getElementById('current-avatar').style.backgroundSize = 'cover';
             }
             
             if (currentUser.bannerUrl) {
               document.getElementById('current-banner').style.backgroundImage = 
-                'url(' + currentUser.bannerUrl + ')';
+                'url(' + currentUser.bannerUrl + '?width=800&quality=85)';
             }
           }
         }
@@ -1519,14 +1155,14 @@ app.get('/settings', (c) => {
       }
     });
 
-    async function logout() {
+    document.getElementById('logout-btn').addEventListener('click', async () => {
       try {
         await auth.logout();
         window.location.href = '/';
       } catch (error) {
         window.location.href = '/';
       }
-    }
+    });
 
     loadProfile();
   </script>

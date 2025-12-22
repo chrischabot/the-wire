@@ -132,7 +132,7 @@ export function rateLimit(config: RateLimitConfig) {
       // Store updated state
       const ttl = Math.ceil((state.resetAt - now) / 1000);
       await c.env.SESSIONS_KV.put(key, JSON.stringify(state), {
-        expirationTtl: Math.max(ttl, 60),
+        expirationTtl: Math.max(ttl, 1),
       });
 
       // Add rate limit headers to response
