@@ -4,7 +4,7 @@
 
 import { Hono } from 'hono';
 import type { Env } from '../types/env';
-import type { UserProfile, AuthUser, UserSettings } from '../types/user';
+import type { UserProfile, UserSettings } from '../types/user';
 import {
   validateDisplayName,
   validateBio,
