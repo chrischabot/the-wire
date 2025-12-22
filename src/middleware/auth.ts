@@ -30,9 +30,9 @@ export function getJwtSecret(env: Env): string {
 /**
  * Authentication middleware - requires valid JWT
  */
-export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next): Promise<Response | void> => {
   const authHeader = c.req.header('Authorization');
-  const token = extractToken(authHeader);
+  const token = extractToken(authHeader ?? null);
 
   if (!token) {
     return c.json({ success: false, error: 'Authorization required' }, 401);
@@ -57,15 +57,33 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next) =
   c.set('userEmail', payload.email);
   c.set('userHandle', payload.handle);
 
+  // Check if user is banned
+  const doId = c.env.USER_DO.idFromName(payload.sub);
+  const stub = c.env.USER_DO.get(doId);
+  try {
+    const bannedResp = await stub.fetch('https://do.internal/is-banned');
+    const bannedData = await bannedResp.json() as { isBanned: boolean };
+    
+    if (bannedData.isBanned) {
+      return c.json({ 
+        success: false, 
+        error: 'Account has been banned' 
+      }, 403);
+    }
+  } catch (error) {
+    // If check fails, allow request but log error
+    console.error('Error checking ban status:', error);
+  }
+
   await next();
 });
 
 /**
  * Optional authentication middleware - validates JWT if present but doesn't require it
  */
-export const optionalAuth = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+export const optionalAuth = createMiddleware<{ Bindings: Env }>(async (c, next): Promise<void> => {
   const authHeader = c.req.header('Authorization');
-  const token = extractToken(authHeader);
+  const token = extractToken(authHeader ?? null);
 
   if (token) {
     try {

@@ -12,12 +12,18 @@ export interface Post {
   mediaUrls: string[];
   replyToId?: string;    // If reply
   quoteOfId?: string;    // If quote note
+  repostOfId?: string;   // If repost
   createdAt: number;
   likeCount: number;
   replyCount: number;
   repostCount: number;
   quoteCount: number;
   isDeleted: boolean;
+  deletedAt?: number;
+  isTakenDown?: boolean;
+  takenDownAt?: number;
+  takenDownReason?: string;
+  takenDownBy?: string;
 }
 
 /**
@@ -36,6 +42,19 @@ export interface PostMetadata {
   replyCount: number;
   repostCount: number;
   quoteCount: number;
+  repostOfId?: string;
+  originalPost?: {
+    id: string;
+    authorHandle: string;
+    authorDisplayName: string;
+    content: string;
+    mediaUrls: string[];
+  };
+  isDeleted?: boolean;
+  deletedAt?: number;
+  isTakenDown?: boolean;
+  takenDownAt?: number;
+  takenDownReason?: string;
 }
 
 /**

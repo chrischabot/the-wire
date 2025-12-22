@@ -8,6 +8,8 @@ import type { Post, PostMetadata, CreatePostRequest } from '../types/post';
 import { validateNoteContent } from '../utils/validation';
 import { generateId } from '../services/snowflake';
 import { requireAuth, optionalAuth } from '../middleware/auth';
+import { LIMITS, BATCH_SIZE } from '../constants';
+import { createNotification, createMentionNotifications } from '../services/notifications';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -41,8 +43,8 @@ posts.post('/', requireAuth, async (c) => {
     authorId: userId,
     content: body.content.trim(),
     mediaUrls: body.mediaUrls || [],
-    replyToId: body.replyToId,
-    quoteOfId: body.quoteOfId,
+    ...(body.replyToId && { replyToId: body.replyToId }),
+    ...(body.quoteOfId && { quoteOfId: body.quoteOfId }),
     createdAt: now,
     likeCount: 0,
     replyCount: 0,
@@ -64,7 +66,7 @@ posts.post('/', requireAuth, async (c) => {
   const userDoId = c.env.USER_DO.idFromName(userId);
   const userStub = c.env.USER_DO.get(userDoId);
   const profileResponse = await userStub.fetch('https://do.internal/profile');
-  const profile = await profileResponse.json();
+  const profile = await profileResponse.json() as import('../types/user').UserProfile;
 
   // Create post metadata for KV
   const metadata: PostMetadata = {
@@ -98,6 +100,9 @@ posts.post('/', requireAuth, async (c) => {
     method: 'POST',
   });
 
+  // Detect and create mention notifications
+  await createMentionNotifications(c.env, body.content, userId, postId);
+
   // If this is a reply, increment parent's reply count
   if (body.replyToId) {
     const parentDoId = c.env.POST_DO.idFromName(body.replyToId);
@@ -105,6 +110,21 @@ posts.post('/', requireAuth, async (c) => {
     await parentStub.fetch('https://do.internal/replies/increment', {
       method: 'POST',
     });
+    
+    // Create reply notification for parent post author
+    const parentPostData = await c.env.POSTS_KV.get(`post:${body.replyToId}`);
+    if (parentPostData) {
+      const parentPost = JSON.parse(parentPostData);
+      if (parentPost.authorId !== userId) {
+        await createNotification(c.env, {
+          userId: parentPost.authorId,
+          type: 'reply',
+          actorId: userId,
+          postId: body.replyToId,
+          content: post.content.slice(0, 100),
+        });
+      }
+    }
   }
 
   // If this is a quote, increment parent's quote count
@@ -139,7 +159,7 @@ posts.get('/:id', optionalAuth, async (c) => {
       const likedResponse = await stub.fetch(
         `https://do.internal/has-liked?userId=${userId}`
       );
-      const likedData = await likedResponse.json();
+      const likedData = await likedResponse.json() as { hasLiked: boolean };
       hasLiked = likedData.hasLiked;
     }
 
@@ -150,6 +170,105 @@ posts.get('/:id', optionalAuth, async (c) => {
   }
 
   return c.json({ success: false, error: 'Post not found' }, 404);
+});
+
+/**
+ * GET /api/posts/:id/thread - Get post with replies thread
+ */
+posts.get('/:id/thread', optionalAuth, async (c) => {
+  const postId = c.req.param('id');
+  const userId = c.get('userId');
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
+
+  // Get the main post
+  const mainPostData = await c.env.POSTS_KV.get(`post:${postId}`);
+  if (!mainPostData) {
+    return c.json({ success: false, error: 'Post not found' }, 404);
+  }
+
+  const mainPost = JSON.parse(mainPostData);
+
+  // Check if user liked the main post
+  let mainPostLiked = false;
+  if (userId) {
+    const doId = c.env.POST_DO.idFromName(postId);
+    const stub = c.env.POST_DO.get(doId);
+    try {
+      const likedResp = await stub.fetch(`https://do.internal/has-liked?userId=${userId}`);
+      const likedData = await likedResp.json() as { hasLiked: boolean };
+      mainPostLiked = likedData.hasLiked;
+    } catch {
+      // Ignore error
+    }
+  }
+
+  // Get parent posts if this is a reply (build ancestor chain)
+  const ancestors: any[] = [];
+  let currentReplyTo = mainPost.replyToId;
+  
+  while (currentReplyTo && ancestors.length < LIMITS.MAX_THREAD_DEPTH) {
+    const parentData = await c.env.POSTS_KV.get(`post:${currentReplyTo}`);
+    if (!parentData) break;
+    
+    const parent = JSON.parse(parentData);
+    ancestors.unshift(parent); // Add to beginning
+    currentReplyTo = parent.replyToId;
+  }
+
+  // Get replies to this post
+  const replies: any[] = [];
+  let cursor: string | undefined;
+
+  // Search for replies (in production, use a secondary index)
+  while (replies.length < limit) {
+    const listResult = await c.env.POSTS_KV.list({
+      prefix: 'post:',
+      limit: BATCH_SIZE.KV_LIST,
+      cursor: cursor ?? null,
+    });
+
+    for (const key of listResult.keys) {
+      if (replies.length >= limit) break;
+      
+      const replyData = await c.env.POSTS_KV.get(key.name);
+      if (!replyData) continue;
+      
+      const reply = JSON.parse(replyData);
+      
+      if (reply.replyToId === postId && !reply.isDeleted) {
+        // Check if user liked this reply
+        let hasLiked = false;
+        if (userId) {
+          try {
+            const doId = c.env.POST_DO.idFromName(reply.id);
+            const stub = c.env.POST_DO.get(doId);
+            const likedResp = await stub.fetch(`https://do.internal/has-liked?userId=${userId}`);
+            const likedData = await likedResp.json() as { hasLiked: boolean };
+            hasLiked = likedData.hasLiked;
+          } catch {
+            // Ignore error
+          }
+        }
+        replies.push({ ...reply, hasLiked });
+      }
+    }
+
+    if (listResult.list_complete) break;
+    cursor = listResult.cursor;
+  }
+
+  // Sort replies by creation time ascending (oldest first for thread view)
+  replies.sort((a, b) => a.createdAt - b.createdAt);
+
+  return c.json({
+    success: true,
+    data: {
+      ancestors,
+      post: { ...mainPost, hasLiked: mainPostLiked },
+      replies: replies.slice(0, limit),
+      hasMoreReplies: replies.length >= limit,
+    },
+  });
 });
 
 /**
@@ -182,7 +301,17 @@ posts.delete('/:id', requireAuth, async (c) => {
   metadata.replyCount = 0;
   metadata.repostCount = 0;
   metadata.quoteCount = 0;
+  metadata.isDeleted = true;
+  metadata.deletedAt = Date.now();
   await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(metadata));
+
+  // Enqueue delete fan-out message
+  await c.env.FANOUT_QUEUE.send({
+    type: 'delete_post',
+    postId,
+    authorId: userId,
+    timestamp: Date.now(),
+  });
 
   // Decrement user's post count
   const userDoId = c.env.USER_DO.idFromName(userId);
@@ -216,7 +345,7 @@ posts.post('/:id/like', requireAuth, async (c) => {
       return c.json({ success: false, error: 'Error liking post' }, 500);
     }
 
-    const { likeCount } = await response.json();
+    const { likeCount } = await response.json() as { likeCount: number };
 
     // Update KV cache
     const cached = await c.env.POSTS_KV.get(`post:${postId}`);
@@ -224,6 +353,16 @@ posts.post('/:id/like', requireAuth, async (c) => {
       const metadata: PostMetadata = JSON.parse(cached);
       metadata.likeCount = likeCount;
       await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(metadata));
+      
+      // Create like notification for post author
+      if (metadata.authorId !== userId) {
+        await createNotification(c.env, {
+          userId: metadata.authorId,
+          type: 'like',
+          actorId: userId,
+          postId,
+        });
+      }
     }
 
     return c.json({ success: true, data: { likeCount } });
@@ -255,7 +394,7 @@ posts.delete('/:id/like', requireAuth, async (c) => {
       return c.json({ success: false, error: 'Error unliking post' }, 500);
     }
 
-    const { likeCount } = await response.json();
+    const { likeCount } = await response.json() as { likeCount: number };
 
     // Update KV cache
     const cached = await c.env.POSTS_KV.get(`post:${postId}`);
@@ -270,6 +409,152 @@ posts.delete('/:id/like', requireAuth, async (c) => {
     console.error('Error unliking post:', error);
     return c.json({ success: false, error: 'Error unliking post' }, 500);
   }
+});
+
+/**
+ * POST /api/posts/:id/repost - Repost a post
+ */
+posts.post('/:id/repost', requireAuth, async (c) => {
+  const postId = c.req.param('id');
+  const userId = c.get('userId');
+  const userHandle = c.get('userHandle');
+
+  // Check if original post exists
+  const originalPostData = await c.env.POSTS_KV.get(`post:${postId}`);
+  if (!originalPostData) {
+    return c.json({ success: false, error: 'Post not found' }, 404);
+  }
+
+  const originalPost = JSON.parse(originalPostData);
+
+  // Check if user is blocked by original author
+  const authorDoId = c.env.USER_DO.idFromName(originalPost.authorId);
+  const authorStub = c.env.USER_DO.get(authorDoId);
+  const blockedCheckResp = await authorStub.fetch(
+    `https://do.internal/is-blocked?userId=${userId}`
+  );
+  const blockedData = await blockedCheckResp.json() as { isBlocked: boolean };
+  
+  if (blockedData.isBlocked) {
+    return c.json({ success: false, error: 'Cannot repost this user\'s content' }, 403);
+  }
+
+  // Check if already reposted
+  const originalDoId = c.env.POST_DO.idFromName(postId);
+  const originalStub = c.env.POST_DO.get(originalDoId);
+  const repostedCheckResp = await originalStub.fetch(
+    `https://do.internal/has-reposted?userId=${userId}`
+  );
+  const repostedData = await repostedCheckResp.json() as { hasReposted: boolean };
+  
+  if (repostedData.hasReposted) {
+    return c.json({ success: false, error: 'You have already reposted this' }, 409);
+  }
+
+  // Create repost (a new post that references the original)
+  const repostId = generateId();
+  const now = Date.now();
+
+  const repost: Post = {
+    id: repostId,
+    authorId: userId,
+    content: '', // Reposts have no additional content
+    mediaUrls: [],
+    repostOfId: postId, // New field for reposts
+    createdAt: now,
+    likeCount: 0,
+    replyCount: 0,
+    repostCount: 0,
+    quoteCount: 0,
+    isDeleted: false,
+  };
+
+  // Initialize PostDO for repost
+  const doId = c.env.POST_DO.idFromName(repostId);
+  const stub = c.env.POST_DO.get(doId);
+  await stub.fetch('https://do.internal/initialize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ post: repost }),
+  });
+
+  // Get user profile for metadata
+  const userDoId = c.env.USER_DO.idFromName(userId);
+  const userStub = c.env.USER_DO.get(userDoId);
+  const profileResponse = await userStub.fetch('https://do.internal/profile');
+  const profile = await profileResponse.json() as import('../types/user').UserProfile;
+
+  // Create repost metadata for KV
+  const metadata = {
+    id: repostId,
+    authorId: userId,
+    authorHandle: userHandle,
+    authorDisplayName: profile.displayName || userHandle,
+    authorAvatarUrl: profile.avatarUrl || '',
+    content: '',
+    mediaUrls: [],
+    repostOfId: postId,
+    originalPost: {
+      id: originalPost.id,
+      authorHandle: originalPost.authorHandle,
+      authorDisplayName: originalPost.authorDisplayName,
+      content: originalPost.content,
+      mediaUrls: originalPost.mediaUrls,
+    },
+    createdAt: now,
+    likeCount: 0,
+    replyCount: 0,
+    repostCount: 0,
+    quoteCount: 0,
+  };
+
+  await c.env.POSTS_KV.put(`post:${repostId}`, JSON.stringify(metadata));
+
+  // Add repost tracking and increment count on original post
+  const repostResp = await originalStub.fetch('https://do.internal/repost', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+
+  if (!repostResp.ok) {
+    return c.json({ success: false, error: 'Error updating repost count' }, 500);
+  }
+
+  const { repostCount } = await repostResp.json() as { repostCount: number };
+
+  // Update original post's repost count in KV
+  const updatedOriginal = await c.env.POSTS_KV.get(`post:${postId}`);
+  if (updatedOriginal) {
+    const updatedPost = JSON.parse(updatedOriginal);
+    updatedPost.repostCount = repostCount;
+    await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(updatedPost));
+  }
+
+  // Enqueue fan-out for the repost
+  await c.env.FANOUT_QUEUE.send({
+    type: 'new_post',
+    postId: repostId,
+    authorId: userId,
+    timestamp: now,
+  });
+
+  // Increment user's post count
+  await userStub.fetch('https://do.internal/posts/increment', {
+    method: 'POST',
+  });
+
+  // Create repost notification for original post author
+  if (originalPost.authorId !== userId) {
+    await createNotification(c.env, {
+      userId: originalPost.authorId,
+      type: 'repost',
+      actorId: userId,
+      postId,
+    });
+  }
+
+  return c.json({ success: true, data: metadata }, 201);
 });
 
 export default posts;

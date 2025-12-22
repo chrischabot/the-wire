@@ -5,18 +5,41 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import type { Env } from './types/env';
 import authRoutes from './handlers/auth';
 import usersRoutes from './handlers/users';
 import postsRoutes from './handlers/posts';
 import mediaRoutes from './handlers/media';
 import feedRoutes from './handlers/feed';
+import moderationRoutes from './handlers/moderation';
+import notificationsRoutes from './handlers/notifications';
+import { rateLimit, RATE_LIMITS } from './middleware/rate-limit';
+import { csrfProtection } from './middleware/csrf';
+import { handleScheduled } from './handlers/scheduled';
 
 // Create Hono app with environment typing
 const app = new Hono<{ Bindings: Env }>();
 
 // Global middleware
 app.use('*', cors());
+
+// Request body size limit (1MB for JSON, handled separately for multipart)
+app.use('/api/*', bodyLimit({
+  maxSize: 1024 * 1024, // 1MB
+  onError: (c) => {
+    return c.json({
+      success: false,
+      error: 'Request body too large',
+    }, 413);
+  },
+}));
+
+// CSRF protection for state-changing requests
+app.use('*', csrfProtection());
+
+// General API rate limiting (100 req/min per IP)
+app.use('/api/*', rateLimit({ ...RATE_LIMITS.api, perUser: false }));
 
 // Health check endpoint
 app.get('/health', (c) => {
@@ -341,40 +364,99 @@ app.get('/home', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Home - The Wire</title>
+  <title>Home / The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-  <div class="container">
-    <div class="nav-bar">
-      <h1 style="margin: 0;">The Wire</h1>
-      <button id="logout-btn">Log Out</button>
+  <div class="twitter-layout">
+    <!-- Left Sidebar -->
+    <div class="sidebar-left">
+      <div class="logo">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
+      </div>
+      
+      <a href="/home" class="nav-item active">
+        <span class="nav-icon">🏠</span>
+        <span>Home</span>
+      </a>
+      <a href="/explore" class="nav-item">
+        <span class="nav-icon">🔍</span>
+        <span>Explore</span>
+      </a>
+      <a href="/notifications" class="nav-item">
+        <span class="nav-icon">🔔</span>
+        <span>Notifications</span>
+      </a>
+      <a href="/u/${c.get('userHandle') || 'me'}" class="nav-item">
+        <span class="nav-icon">👤</span>
+        <span>Profile</span>
+      </a>
+      <a href="/settings" class="nav-item">
+        <span class="nav-icon">⚙️</span>
+        <span>Settings</span>
+      </a>
+      
+      <button class="post-button">Post</button>
     </div>
 
-    <div class="compose-box">
-      <h2>What's on your mind?</h2>
-      <div style="display: flex; gap: 1rem; align-items: start;">
-        <img id="compose-avatar" class="avatar" src="" alt="Your avatar" style="display: none;">
-        <div style="flex: 1;">
-          <form id="compose-form">
-            <textarea 
-              id="note-content" 
-              placeholder="Share a note..."
-              maxlength="280"
-            ></textarea>
-            <div class="compose-footer">
-              <span id="char-counter" class="char-counter">0 / 280</span>
-              <button type="submit" id="post-btn" disabled>Post Note</button>
-            </div>
-          </form>
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="page-header">
+        <h2>Home</h2>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active">For you</button>
+        <button class="tab">Following</button>
+      </div>
+
+      <div class="compose-box">
+        <div style="display: flex; gap: 12px;">
+          <img id="compose-avatar" class="avatar" src="" alt="Your avatar" style="display: none;">
+          <div style="flex: 1;">
+            <form id="compose-form">
+              <textarea 
+                id="note-content" 
+                placeholder="What's happening?"
+                maxlength="280"
+              ></textarea>
+              <div class="compose-footer">
+                <div class="compose-actions">
+                  <button type="button" class="icon-button">📷</button>
+                  <button type="button" class="icon-button">😊</button>
+                  <button type="button" class="icon-button">📊</button>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <span id="char-counter" class="char-counter">0 / 280</span>
+                  <button type="submit" class="tweet-button" id="post-btn" disabled>Post</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div id="compose-error" class="error"></div>
+        <div id="compose-success" class="success"></div>
+      </div>
+
+      <div id="timeline">
+        <div class="empty-state">Loading your timeline...</div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="sidebar-right">
+      <div class="search-box">
+        <input type="text" class="search-input" placeholder="Search">
+      </div>
+      
+      <div class="widget-box">
+        <div class="widget-header">What's happening</div>
+        <div class="widget-item">
+          <div class="widget-item-meta">Trending</div>
+          <div class="widget-item-title">Example Trend</div>
+          <div class="widget-item-meta">1,234 posts</div>
         </div>
       </div>
-      <div id="compose-error" class="error"></div>
-      <div id="compose-success" class="success"></div>
-    </div>
-
-    <div id="timeline">
-      <div class="empty-state">Loading your timeline...</div>
     </div>
   </div>
 
@@ -392,28 +474,31 @@ app.get('/home', (c) => {
     const composeSuccess = document.getElementById('compose-success');
     const timeline = document.getElementById('timeline');
 
-    let userPosts = [];
     let currentUser = null;
 
-    // Load posts from localStorage on page load
-    function loadPostsFromStorage() {
-      const stored = localStorage.getItem('user_posts');
-      if (stored) {
-        try {
-          userPosts = JSON.parse(stored);
-          renderTimeline();
-        } catch (error) {
-          console.error('Error loading posts from storage:', error);
-        }
-      }
-    }
-
-    // Save posts to localStorage
-    function savePostsToStorage() {
+    async function loadTimeline() {
       try {
-        localStorage.setItem('user_posts', JSON.stringify(userPosts));
+        timeline.innerHTML = '<div class="empty-state">Loading your timeline...</div>';
+        
+        const response = await fetch('/api/feed/home?limit=20', {
+          headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('auth_token'),
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to load feed');
+        }
+        
+        const feedData = await response.json();
+        if (feedData.success && feedData.data.posts) {
+          renderTimeline(feedData.data.posts);
+        } else {
+          timeline.innerHTML = '<div class="empty-state">No posts in your feed yet. Follow some users!</div>';
+        }
       } catch (error) {
-        console.error('Error saving posts to storage:', error);
+        console.error('Error loading timeline:', error);
+        timeline.innerHTML = '<div class="error">Error loading timeline. Please refresh.</div>';
       }
     }
 
@@ -428,7 +513,7 @@ app.get('/home', (c) => {
             
             const composeAvatar = document.getElementById('compose-avatar');
             if (currentUser.avatarUrl) {
-              composeAvatar.src = currentUser.avatarUrl + '?width=48&quality=80';
+              composeAvatar.src = currentUser.avatarUrl;
               composeAvatar.style.display = 'block';
             }
           }
@@ -443,7 +528,6 @@ app.get('/home', (c) => {
       charCounter.textContent = length + ' / 280';
       
       if (length === 0) {
-        charCounter.className = 'char-counter';
         postBtn.disabled = true;
       } else if (length > 260) {
         charCounter.className = 'char-counter warning';
@@ -469,64 +553,59 @@ app.get('/home', (c) => {
         const response = await posts.create(content);
         
         if (response.success) {
-          composeSuccess.textContent = 'Note posted!';
+          composeSuccess.textContent = 'Posted!';
           textarea.value = '';
           charCounter.textContent = '0 / 280';
           charCounter.className = 'char-counter';
           
-          userPosts.unshift(response.data);
-          savePostsToStorage();
-          renderTimeline();
-          
           setTimeout(() => {
+            loadTimeline();
             composeSuccess.textContent = '';
-          }, 3000);
+          }, 1000);
         }
       } catch (error) {
         composeError.textContent = error.message;
       } finally {
         postBtn.disabled = false;
-        postBtn.textContent = 'Post Note';
+        postBtn.textContent = 'Post';
       }
     });
 
-    function renderTimeline() {
-      if (userPosts.length === 0) {
-        timeline.innerHTML = '<div class="empty-state">No notes yet. Be the first to post!</div>';
+    function renderTimeline(posts) {
+      if (!posts || posts.length === 0) {
+        timeline.innerHTML = '<div class="empty-state">No posts yet. Follow users to see their posts!</div>';
         return;
       }
 
-      timeline.innerHTML = userPosts.map(post => {
+      timeline.innerHTML = posts.map(post => {
         const date = new Date(post.createdAt);
-        const timeStr = date.toLocaleTimeString() + ' · ' + date.toLocaleDateString();
+        const timeStr = formatTimeAgo(date);
         
         const avatarHtml = post.authorAvatarUrl 
-          ? '<img src="' + post.authorAvatarUrl + '?width=48&quality=80" class="avatar" alt="' + post.authorDisplayName + '">'
-          : '<div class="avatar" style="background: linear-gradient(135deg, #00d9ff, #0077ff);"></div>';
+          ? '<img src="' + post.authorAvatarUrl + '" class="avatar" alt="' + post.authorDisplayName + '">'
+          : '<div class="avatar" style="background: #1D9BF0;"></div>';
         
-        return '<div class="post-card" data-post-id="' + post.id + '">' +
+        const likedClass = post.hasLiked ? ' liked' : '';
+        
+        return '<div class="post-card" data-post-id="' + post.id + '" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
           '<div class="post-header">' +
-            avatarHtml +
-            '<div style="flex: 1; margin-left: 0.75rem;">' +
-              '<div>' +
-                '<a href="/u/' + post.authorHandle + '" class="post-author-link">' +
-                  '<span class="post-author">' + post.authorDisplayName + '</span>' +
-                '</a> ' +
-                '<a href="/u/' + post.authorHandle + '" class="post-handle-link">' +
-                  '<span class="post-handle">@' + post.authorHandle + '</span>' +
-                '</a>' +
+            '<a href="/u/' + post.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
+            '<div class="post-body">' +
+              '<div class="post-author-row">' +
+                '<a href="/u/' + post.authorHandle + '" class="post-author" onclick="event.stopPropagation()">' + escapeHtml(post.authorDisplayName) + '</a>' +
+                '<a href="/u/' + post.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + post.authorHandle + '</a>' +
+                '<span class="post-timestamp">' + timeStr + '</span>' +
               '</div>' +
-              '<span class="post-timestamp">' + timeStr + '</span>' +
+              '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
+              '<div class="post-actions" onclick="event.stopPropagation()">' +
+                '<span class="post-action">💬 ' + post.replyCount + '</span>' +
+                '<span class="post-action">🔁 ' + post.repostCount + '</span>' +
+                '<span class="post-action' + likedClass + '" data-action="like" data-post-id="' + post.id + '">' +
+                  '❤️ <span class="like-count">' + post.likeCount + '</span>' +
+                '</span>' +
+                '<span class="post-action">📊</span>' +
+              '</div>' +
             '</div>' +
-          '</div>' +
-          '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
-          '<div class="post-actions">' +
-            '<span class="post-action" data-action="like" data-post-id="' + post.id + '">' +
-              '❤️ ' + post.likeCount +
-            '</span>' +
-            '<span class="post-action">' +
-              '💬 ' + post.replyCount +
-            '</span>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -537,21 +616,22 @@ app.get('/home', (c) => {
     }
 
     async function handleLike(e) {
-      const postId = e.currentTarget.dataset.postId;
-      const post = userPosts.find(p => p.id === postId);
-      if (!post) return;
+      e.stopPropagation();
+      const button = e.currentTarget;
+      const postId = button.dataset.postId;
+      const likeCountSpan = button.querySelector('.like-count');
+      const isLiked = button.classList.contains('liked');
 
       try {
-        if (post.hasLiked) {
+        if (isLiked) {
           await posts.unlike(postId);
-          post.likeCount--;
-          post.hasLiked = false;
+          button.classList.remove('liked');
+          likeCountSpan.textContent = parseInt(likeCountSpan.textContent) - 1;
         } else {
           await posts.like(postId);
-          post.likeCount++;
-          post.hasLiked = true;
+          button.classList.add('liked');
+          likeCountSpan.textContent = parseInt(likeCountSpan.textContent) + 1;
         }
-        renderTimeline();
       } catch (error) {
         console.error('Error liking post:', error);
       }
@@ -563,19 +643,19 @@ app.get('/home', (c) => {
       return div.innerHTML;
     }
 
-    document.getElementById('logout-btn').addEventListener('click', async () => {
-      try {
-        await auth.logout();
-        window.location.href = '/';
-      } catch (error) {
-        console.error('Logout error:', error);
-        window.location.href = '/';
-      }
-    });
+    function formatTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      
+      if (seconds < 60) return seconds + 's';
+      if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+      if (seconds < 86400) return Math.floor(seconds / 3600) + 'h';
+      if (seconds < 604800) return Math.floor(seconds / 86400) + 'd';
+      
+      return date.toLocaleDateString();
+    }
 
-    renderTimeline();
+    loadTimeline();
     loadUserProfile();
-    loadPostsFromStorage();
   </script>
 </body>
 </html>
@@ -591,24 +671,98 @@ app.get('/post/:id', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Post - The Wire</title>
+  <title>Post / The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-  <div class="container">
-    <div class="nav-bar">
-      <h1 style="margin: 0;">The Wire</h1>
-      <button onclick="window.location.href='/home'">Back to Home</button>
+  <div class="twitter-layout">
+    <!-- Left Sidebar -->
+    <div class="sidebar-left">
+      <div class="logo">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
+      </div>
+      
+      <a href="/home" class="nav-item">
+        <span class="nav-icon">🏠</span>
+        <span>Home</span>
+      </a>
+      <a href="/explore" class="nav-item">
+        <span class="nav-icon">🔍</span>
+        <span>Explore</span>
+      </a>
+      <a href="/notifications" class="nav-item">
+        <span class="nav-icon">🔔</span>
+        <span>Notifications</span>
+      </a>
+      <a href="/u/me" class="nav-item">
+        <span class="nav-icon">👤</span>
+        <span>Profile</span>
+      </a>
+      <a href="/settings" class="nav-item">
+        <span class="nav-icon">⚙️</span>
+        <span>Settings</span>
+      </a>
+      
+      <button class="post-button">Post</button>
     </div>
 
-    <div id="post-container">
-      <div class="empty-state">Loading post...</div>
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="page-header">
+        <button onclick="history.back()" style="background: none; border: none; cursor: pointer; font-size: 20px; margin-right: 24px;">←</button>
+        <h2>Post</h2>
+      </div>
+
+      <div id="post-container">
+        <div class="empty-state">Loading post...</div>
+      </div>
+
+      <!-- Reply Composer -->
+      <div id="reply-composer" style="display: none;">
+        <div class="compose-box">
+          <div style="display: flex; gap: 12px;">
+            <img id="reply-avatar" class="avatar" src="" alt="Your avatar">
+            <div style="flex: 1;">
+              <form id="reply-form">
+                <textarea 
+                  id="reply-content" 
+                  placeholder="Post your reply"
+                  maxlength="280"
+                ></textarea>
+                <div class="compose-footer">
+                  <div class="compose-actions">
+                    <button type="button" class="icon-button">📷</button>
+                    <button type="button" class="icon-button">😊</button>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <span id="reply-char-counter" class="char-counter">0 / 280</span>
+                    <button type="submit" class="tweet-button" id="reply-btn" disabled>Reply</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div id="reply-error" class="error"></div>
+          <div id="reply-success" class="success"></div>
+        </div>
+      </div>
+
+      <!-- Replies List -->
+      <div id="replies-container"></div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="sidebar-right">
+      <div class="search-box">
+        <input type="text" class="search-input" placeholder="Search">
+      </div>
     </div>
   </div>
 
   <script src="/js/api.js"></script>
   <script>
     const postId = '${postId}';
+    let currentUser = null;
 
     async function loadPost() {
       try {
@@ -617,46 +771,171 @@ app.get('/post/:id', (c) => {
         if (response.success) {
           const post = response.data;
           const date = new Date(post.createdAt);
-          const timeStr = date.toLocaleTimeString() + ' · ' + date.toLocaleDateString();
+          const fullTime = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' · ' + 
+                          date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
           
           const avatarHtml = post.authorAvatarUrl
-            ? '<img src="' + post.authorAvatarUrl + '?width=64&quality=80" class="avatar avatar-lg" alt="' + post.authorDisplayName + '">'
-            : '<div class="avatar avatar-lg" style="background: linear-gradient(135deg, #00d9ff, #0077ff);"></div>';
+            ? '<img src="' + post.authorAvatarUrl + '" class="avatar" alt="' + post.authorDisplayName + '">'
+            : '<div class="avatar" style="background: #1D9BF0;"></div>';
+          
+          const likedClass = post.hasLiked ? ' liked' : '';
           
           document.getElementById('post-container').innerHTML =
-            '<div class="post-card">' +
+            '<div style="padding: 12px 16px; border-bottom: 1px solid #EFF3F4;">' +
               '<div class="post-header">' +
-                avatarHtml +
-                '<div style="flex: 1; margin-left: 0.75rem;">' +
-                  '<div>' +
-                    '<a href="/u/' + post.authorHandle + '" class="post-author-link">' +
-                      '<span class="post-author">' + post.authorDisplayName + '</span>' +
-                    '</a> ' +
-                    '<a href="/u/' + post.authorHandle + '" class="post-handle-link">' +
-                      '<span class="post-handle">@' + post.authorHandle + '</span>' +
-                    '</a>' +
+                '<a href="/u/' + post.authorHandle + '">' + avatarHtml + '</a>' +
+                '<div class="post-body">' +
+                  '<div class="post-author-row">' +
+                    '<a href="/u/' + post.authorHandle + '" class="post-author">' + escapeHtml(post.authorDisplayName) + '</a>' +
+                    '<a href="/u/' + post.authorHandle + '" class="post-handle">@' + post.authorHandle + '</a>' +
                   '</div>' +
-                  '<span class="post-timestamp">' + timeStr + '</span>' +
                 '</div>' +
               '</div>' +
-              '<div class="post-content" style="font-size: 1.2rem;">' + escapeHtml(post.content) + '</div>' +
-              '<div class="post-actions">' +
-                '<span class="post-action ' + (post.hasLiked ? 'liked' : '') + '" id="like-btn">' +
+              '<div class="post-content" style="font-size: 23px; line-height: 28px; margin: 12px 0;">' + escapeHtml(post.content) + '</div>' +
+              '<div style="color: #536471; font-size: 15px; margin: 12px 0; padding-bottom: 12px; border-bottom: 1px solid #EFF3F4;">' + fullTime + '</div>' +
+              '<div class="post-actions" style="border-bottom: 1px solid #EFF3F4; padding: 12px 0;">' +
+                '<span class="post-action">💬 <span id="reply-count">' + post.replyCount + '</span></span>' +
+                '<span class="post-action">🔁 ' + post.repostCount + '</span>' +
+                '<span class="post-action' + likedClass + '" id="like-btn">' +
                   '❤️ <span id="like-count">' + post.likeCount + '</span>' +
                 '</span>' +
-                '<span class="post-action">' +
-                  '💬 ' + post.replyCount +
-                '</span>' +
+                '<span class="post-action">📊</span>' +
               '</div>' +
             '</div>';
 
           if (auth.isAuthenticated()) {
             document.getElementById('like-btn').addEventListener('click', handleLike);
+            document.getElementById('reply-composer').style.display = 'block';
+            setupReplyComposer();
           }
+          
+          loadReplies();
         }
       } catch (error) {
         document.getElementById('post-container').innerHTML =
-          '<div class="error">Error loading post: ' + error.message + '</div>';
+          '<div class="error">Error loading post</div>';
+      }
+    }
+
+    async function loadUserProfile() {
+      if (!auth.isAuthenticated()) return;
+      
+      try {
+        const response = await auth.me();
+        if (response.success) {
+          const profileResp = await users.getProfile(response.data.handle);
+          if (profileResp.success) {
+            currentUser = profileResp.data;
+            
+            const replyAvatar = document.getElementById('reply-avatar');
+            if (currentUser.avatarUrl) {
+              replyAvatar.src = currentUser.avatarUrl;
+            } else {
+              replyAvatar.style.display = 'none';
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading profile:', error);
+      }
+    }
+
+    function setupReplyComposer() {
+      const replyTextarea = document.getElementById('reply-content');
+      const replyCounter = document.getElementById('reply-char-counter');
+      const replyBtn = document.getElementById('reply-btn');
+      const replyForm = document.getElementById('reply-form');
+      const replyError = document.getElementById('reply-error');
+      const replySuccess = document.getElementById('reply-success');
+
+      replyTextarea.addEventListener('input', () => {
+        const length = replyTextarea.value.length;
+        replyCounter.textContent = length + ' / 280';
+        replyBtn.disabled = length === 0;
+      });
+
+      replyForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const content = replyTextarea.value.trim();
+        if (!content) return;
+
+        replyError.textContent = '';
+        replySuccess.textContent = '';
+        replyBtn.disabled = true;
+        replyBtn.textContent = 'Replying...';
+
+        try {
+          const response = await posts.create(content, [], postId, null);
+          
+          if (response.success) {
+            replySuccess.textContent = 'Reply posted!';
+            replyTextarea.value = '';
+            replyCounter.textContent = '0 / 280';
+            
+            const replyCountEl = document.getElementById('reply-count');
+            if (replyCountEl) {
+              replyCountEl.textContent = parseInt(replyCountEl.textContent) + 1;
+            }
+            
+            setTimeout(() => {
+              loadReplies();
+              replySuccess.textContent = '';
+            }, 500);
+          }
+        } catch (error) {
+          replyError.textContent = error.message;
+        } finally {
+          replyBtn.disabled = false;
+          replyBtn.textContent = 'Reply';
+        }
+      });
+    }
+
+    async function loadReplies() {
+      try {
+        const response = await fetch('/api/posts/' + postId + '/thread');
+        const data = await response.json();
+        
+        const repliesContainer = document.getElementById('replies-container');
+        
+        if (data.success && data.data.replies && data.data.replies.length > 0) {
+          repliesContainer.innerHTML = data.data.replies.map(reply => {
+            const date = new Date(reply.createdAt);
+            const timeStr = formatTimeAgo(date);
+            
+            const avatarHtml = reply.authorAvatarUrl
+              ? '<img src="' + reply.authorAvatarUrl + '" class="avatar" alt="' + reply.authorDisplayName + '">'
+              : '<div class="avatar" style="background: #1D9BF0;"></div>';
+            
+            const likedClass = reply.hasLiked ? ' liked' : '';
+            
+            return '<div class="post-card" onclick="window.location.href=\\'/post/' + reply.id + '\\'">' +
+              '<div class="post-header">' +
+                '<a href="/u/' + reply.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
+                '<div class="post-body">' +
+                  '<div class="post-author-row">' +
+                    '<a href="/u/' + reply.authorHandle + '" class="post-author" onclick="event.stopPropagation()">' + escapeHtml(reply.authorDisplayName) + '</a>' +
+                    '<a href="/u/' + reply.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + reply.authorHandle + '</a>' +
+                    '<span class="post-timestamp">' + timeStr + '</span>' +
+                  '</div>' +
+                  '<div class="post-content">' + escapeHtml(reply.content) + '</div>' +
+                  '<div class="post-actions" onclick="event.stopPropagation()">' +
+                    '<span class="post-action">💬 ' + reply.replyCount + '</span>' +
+                    '<span class="post-action">🔁 ' + reply.repostCount + '</span>' +
+                    '<span class="post-action' + likedClass + '">❤️ ' + reply.likeCount + '</span>' +
+                    '<span class="post-action">📊</span>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+        } else {
+          repliesContainer.innerHTML = '<div class="empty-state">No replies yet. Be the first to reply!</div>';
+        }
+      } catch (error) {
+        console.error('Error loading replies:', error);
+        document.getElementById('replies-container').innerHTML = '<div class="error">Error loading replies</div>';
       }
     }
 
@@ -686,7 +965,17 @@ app.get('/post/:id', (c) => {
       return div.innerHTML;
     }
 
+    function formatTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      if (seconds < 60) return seconds + 's';
+      if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+      if (seconds < 86400) return Math.floor(seconds / 3600) + 'h';
+      if (seconds < 604800) return Math.floor(seconds / 86400) + 'd';
+      return date.toLocaleDateString();
+    }
+
     loadPost();
+    loadUserProfile();
   </script>
 </body>
 </html>
@@ -891,18 +1180,57 @@ app.get('/u/:handle', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>@${handle} - The Wire</title>
+  <title>@${handle} / The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-  <div class="container">
-    <div class="nav-bar">
-      <h1 style="margin: 0;">The Wire</h1>
-      <button onclick="window.location.href='/home'">Home</button>
+  <div class="twitter-layout">
+    <!-- Left Sidebar -->
+    <div class="sidebar-left">
+      <div class="logo">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
+      </div>
+      
+      <a href="/home" class="nav-item">
+        <span class="nav-icon">🏠</span>
+        <span>Home</span>
+      </a>
+      <a href="/explore" class="nav-item">
+        <span class="nav-icon">🔍</span>
+        <span>Explore</span>
+      </a>
+      <a href="/notifications" class="nav-item">
+        <span class="nav-icon">🔔</span>
+        <span>Notifications</span>
+      </a>
+      <a href="/u/me" class="nav-item active">
+        <span class="nav-icon">👤</span>
+        <span>Profile</span>
+      </a>
+      <a href="/settings" class="nav-item">
+        <span class="nav-icon">⚙️</span>
+        <span>Settings</span>
+      </a>
+      
+      <button class="post-button">Post</button>
     </div>
 
-    <div id="profile-container">
-      <div class="empty-state">Loading profile...</div>
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="page-header">
+        <h2>@${handle}</h2>
+      </div>
+
+      <div id="profile-container">
+        <div class="empty-state">Loading profile...</div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="sidebar-right">
+      <div class="search-box">
+        <input type="text" class="search-input" placeholder="Search">
+      </div>
     </div>
   </div>
 
@@ -938,97 +1266,141 @@ app.get('/u/:handle', (c) => {
         }
       } catch (error) {
         document.getElementById('profile-container').innerHTML =
-          '<div class="error">Error loading profile: ' + error.message + '</div>';
+          '<div class="error">Error loading profile</div>';
       }
     }
 
     function renderProfile() {
       const isOwnProfile = currentUserId === profileUser.id;
       
-      let actionButtons = '';
+      let actionButton = '';
       if (auth.isAuthenticated()) {
         if (isOwnProfile) {
-          actionButtons = '<button class="action-btn" onclick="window.location.href=\\'/settings\\'">Edit Profile</button>';
+          actionButton = '<button class="btn-secondary" onclick="window.location.href=\\'/settings\\'">Edit profile</button>';
         } else {
-          const followBtnText = isFollowing ? 'Following' : 'Follow';
-          actionButtons = '<button id="follow-btn" class="action-btn">' + followBtnText + '</button>' +
-                         '<button id="block-btn" class="action-btn-secondary">Block</button>';
+          const followText = isFollowing ? 'Following' : 'Follow';
+          const btnClass = isFollowing ? 'btn-secondary' : 'btn-primary';
+          actionButton = '<button id="follow-btn" class="' + btnClass + '">' + followText + '</button>';
         }
       }
 
       const bannerHtml = profileUser.bannerUrl
-        ? '<div class="banner" style="background-image: url(' + profileUser.bannerUrl + '?width=800&quality=85); background-size: cover; background-position: center;"></div>'
-        : '';
+        ? '<img src="' + profileUser.bannerUrl + '" class="profile-banner" alt="Banner">'
+        : '<div class="profile-banner"></div>';
 
       const avatarHtml = profileUser.avatarUrl
-        ? '<img src="' + profileUser.avatarUrl + '?width=128&quality=80" class="avatar avatar-lg clickable" alt="' + profileUser.displayName + '" onclick="viewImage(\\'' + profileUser.avatarUrl + '\\')">'
-        : '<div class="avatar avatar-lg" style="background: linear-gradient(135deg, #00d9ff, #0077ff);"></div>';
+        ? '<img src="' + profileUser.avatarUrl + '" class="avatar avatar-lg" alt="' + profileUser.displayName + '">'
+        : '<div class="avatar avatar-lg" style="background: #1D9BF0;"></div>';
+
+      const joinDate = new Date(profileUser.joinedAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
       document.getElementById('profile-container').innerHTML =
-        bannerHtml +
         '<div class="profile-header">' +
-          avatarHtml +
+          bannerHtml +
           '<div class="profile-info">' +
-            '<h2>' + profileUser.displayName + '</h2>' +
-            '<p class="text-muted">@' + profileUser.handle + '</p>' +
-            '<p>' + (profileUser.bio || '') + '</p>' +
-            '<div class="profile-stats">' +
-              '<span><strong>' + profileUser.followerCount + '</strong> Followers</span>' +
-              '<span><strong>' + profileUser.followingCount + '</strong> Following</span>' +
-              '<span><strong>' + profileUser.postCount + '</strong> Posts</span>' +
+            '<div class="profile-actions-row">' + actionButton + '</div>' +
+            avatarHtml +
+            '<div class="profile-name">' + escapeHtml(profileUser.displayName) + '</div>' +
+            '<div class="profile-handle">@' + profileUser.handle + '</div>' +
+            (profileUser.bio ? '<div class="profile-bio">' + escapeHtml(profileUser.bio) + '</div>' : '') +
+            '<div class="profile-meta">' +
+              (profileUser.location ? '<span>📍 ' + escapeHtml(profileUser.location) + '</span>' : '') +
+              '<span>📅 Joined ' + joinDate + '</span>' +
             '</div>' +
-            '<div class="profile-actions">' + actionButtons + '</div>' +
+            '<div class="profile-stats">' +
+              '<span class="profile-stat"><strong>' + profileUser.followingCount + '</strong> Following</span>' +
+              '<span class="profile-stat"><strong>' + profileUser.followerCount + '</strong> Followers</span>' +
+            '</div>' +
           '</div>' +
         '</div>' +
-        '<div id="user-posts">' +
-          '<h3>Posts</h3>' +
-          '<div class="empty-state">User post timeline will be available in Phase 7 (Feed System)</div>' +
-        '</div>';
+        '<div class="tabs">' +
+          '<button class="tab active">Posts</button>' +
+          '<button class="tab">Replies</button>' +
+          '<button class="tab">Media</button>' +
+          '<button class="tab">Likes</button>' +
+        '</div>' +
+        '<div id="user-posts"></div>';
 
       if (!isOwnProfile && auth.isAuthenticated()) {
-        setupSocialButtons();
+        setupFollowButton();
+      }
+      
+      loadUserPosts();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    async function loadUserPosts() {
+      try {
+        const response = await fetch('/api/users/' + handle + '/posts?limit=20');
+        const data = await response.json();
+        
+        const postsContainer = document.getElementById('user-posts');
+        
+        if (data.success && data.data.posts.length > 0) {
+          postsContainer.innerHTML = data.data.posts.map(post => {
+            const date = new Date(post.createdAt);
+            const timeStr = formatTimeAgo(date);
+            
+            return '<div class="post-card" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
+              '<div class="post-header">' +
+                '<div class="post-body">' +
+                  '<div class="post-author-row">' +
+                    '<span class="post-timestamp">' + timeStr + '</span>' +
+                  '</div>' +
+                  '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
+                  '<div class="post-actions" onclick="event.stopPropagation()">' +
+                    '<span class="post-action">💬 ' + post.replyCount + '</span>' +
+                    '<span class="post-action">🔁 ' + post.repostCount + '</span>' +
+                    '<span class="post-action">❤️ ' + post.likeCount + '</span>' +
+                    '<span class="post-action">📊</span>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+        } else {
+          postsContainer.innerHTML = '<div class="empty-state">No posts yet</div>';
+        }
+      } catch (error) {
+        console.error('Error loading user posts:', error);
       }
     }
 
-    function viewImage(url) {
-      window.open(url, '_blank');
+    function formatTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      if (seconds < 60) return seconds + 's';
+      if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+      if (seconds < 86400) return Math.floor(seconds / 3600) + 'h';
+      if (seconds < 604800) return Math.floor(seconds / 86400) + 'd';
+      return date.toLocaleDateString();
     }
 
-    function setupSocialButtons() {
+    function setupFollowButton() {
       const followBtn = document.getElementById('follow-btn');
-      const blockBtn = document.getElementById('block-btn');
-
       if (followBtn) {
         followBtn.addEventListener('click', async () => {
           try {
             if (isFollowing) {
               await social.unfollow(handle);
               followBtn.textContent = 'Follow';
+              followBtn.className = 'btn-primary';
               isFollowing = false;
               profileUser.followerCount--;
             } else {
               await social.follow(handle);
               followBtn.textContent = 'Following';
+              followBtn.className = 'btn-secondary';
               isFollowing = true;
               profileUser.followerCount++;
             }
             renderProfile();
           } catch (error) {
             alert('Error: ' + error.message);
-          }
-        });
-      }
-
-      if (blockBtn) {
-        blockBtn.addEventListener('click', async () => {
-          if (confirm('Block @' + handle + '?')) {
-            try {
-              await social.block(handle);
-              alert('User blocked');
-              window.location.href = '/home';
-            } catch (error) {
-              alert('Error: ' + error.message);
-            }
           }
         });
       }
@@ -1054,9 +1426,61 @@ app.get('/api', (c) => {
         posts: '/api/posts/*',
         feed: '/api/feed/*',
         media: '/api/media/*',
+        notifications: '/api/notifications/*',
+        ws: '/api/ws (WebSocket)',
       },
     },
   });
+});
+
+/**
+ * WebSocket endpoint - Upgrade to WebSocket connection
+ * Query param: token (JWT for authentication)
+ */
+app.get('/api/ws', async (c) => {
+  const token = c.req.query('token');
+  
+  if (!token) {
+    return c.json({ success: false, error: 'Token required' }, 401);
+  }
+
+  // Verify JWT
+  const { verifyToken } = await import('./utils/jwt');
+  const { getJwtSecret } = await import('./middleware/auth');
+  
+  try {
+    const secret = getJwtSecret(c.env);
+    const payload = await verifyToken(token, secret);
+    
+    if (!payload) {
+      return c.json({ success: false, error: 'Invalid token' }, 401);
+    }
+
+    // Check if user is banned
+    const userDoId = c.env.USER_DO.idFromName(payload.sub);
+    const userStub = c.env.USER_DO.get(userDoId);
+    const bannedResp = await userStub.fetch('https://do.internal/is-banned');
+    const bannedData = await bannedResp.json() as { isBanned: boolean };
+    
+    if (bannedData.isBanned) {
+      return c.json({ success: false, error: 'Account banned' }, 403);
+    }
+
+    // Forward to user's WebSocketDO preserving upgrade semantics
+    const wsDoId = c.env.WEBSOCKET_DO.idFromName(payload.sub);
+    const wsStub = c.env.WEBSOCKET_DO.get(wsDoId);
+    
+    // Clone original request with /connect path
+    const originalReq = c.req.raw;
+    const url = new URL(originalReq.url);
+    url.pathname = '/connect';
+    const forwardedReq = new Request(url.toString(), originalReq);
+    
+    return await wsStub.fetch(forwardedReq);
+  } catch (error) {
+    console.error('WebSocket auth error:', error);
+    return c.json({ success: false, error: 'Authentication failed' }, 401);
+  }
 });
 
 // Mount auth routes
@@ -1074,11 +1498,17 @@ app.route('/api/feed', feedRoutes);
 // Mount media routes
 app.route('/api/media', mediaRoutes);
 
+// Mount moderation routes (admin only)
+app.route('/api/moderation', moderationRoutes);
+
+// Mount notifications routes
+app.route('/api/notifications', notificationsRoutes);
+
 // Serve media files
 app.route('/media', mediaRoutes);
 
 // Serve CSS
-app.get('/css/styles.css', async (c) => {
+app.get('/css/styles.css', async (_c) => {
   const css = `* {
   margin: 0;
   padding: 0;
@@ -1086,277 +1516,290 @@ app.get('/css/styles.css', async (c) => {
 }
 
 :root {
-  --primary: #00d9ff;
-  --primary-dark: #0077ff;
-  --bg-dark: #1a1a2e;
-  --bg-darker: #16213e;
-  --text-light: #fff;
-  --text-muted: #a0a0a0;
-  --error: #ff4444;
-  --success: #44ff44;
-  --input-bg: rgba(255, 255, 255, 0.05);
-  --border: rgba(255, 255, 255, 0.1);
+  --twitter-blue: #1D9BF0;
+  --twitter-blue-hover: #1A8CD8;
+  --twitter-black: #0F1419;
+  --twitter-dark-gray: #536471;
+  --twitter-light-gray: #EFF3F4;
+  --twitter-bg: #FFFFFF;
+  --twitter-hover-bg: #F7F9F9;
+  --twitter-border: #EFF3F4;
+  --twitter-red: #F4212E;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-darker) 100%);
-  min-height: 100vh;
-  color: var(--text-light);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--twitter-bg);
+  color: var(--twitter-black);
+  font-size: 15px;
+  line-height: 20px;
 }
 
-.container {
-  max-width: 600px;
+/* Main layout - 3 columns */
+.twitter-layout {
+  display: flex;
+  max-width: 1265px;
   margin: 0 auto;
-  padding: 2rem;
+  min-height: 100vh;
 }
 
-.auth-container {
-  max-width: 400px;
-  margin: 2rem auto;
-  padding: 2rem;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 12px;
-  border: 1px solid var(--border);
+/* Left sidebar - Navigation */
+.sidebar-left {
+  width: 275px;
+  padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
 }
 
-h1, h2 {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: 1rem;
+.logo {
+  padding: 12px;
+  margin-bottom: 4px;
 }
 
-.form-group {
-  margin-bottom: 1.5rem;
+.logo svg {
+  width: 30px;
+  height: 30px;
+  fill: var(--twitter-black);
 }
 
-label {
-  display: block;
-  margin-bottom: 0.5rem;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-input[type="email"],
-input[type="password"],
-input[type="text"],
-input[type="url"] {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-light);
-  font-size: 1rem;
-  transition: border-color 0.2s;
-}
-
-input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-button {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-  color: var(--text-light);
-  border: none;
-  border-radius: 8px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.error {
-  color: var(--error);
-  font-size: 0.9rem;
-  margin-top: 0.5rem;
-}
-
-.success {
-  color: var(--success);
-  font-size: 0.9rem;
-  margin-top: 0.5rem;
-}
-
-.link {
-  color: var(--primary);
+.nav-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  border-radius: 9999px;
   text-decoration: none;
-  transition: opacity 0.2s;
+  color: var(--twitter-black);
+  font-size: 20px;
+  font-weight: 400;
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
 
-.link:hover {
-  opacity: 0.8;
+.nav-item:hover {
+  background: var(--twitter-hover-bg);
 }
 
-.text-center {
+.nav-item.active {
+  font-weight: 700;
+}
+
+.nav-icon {
+  width: 26px;
+  height: 26px;
+  margin-right: 20px;
+  font-size: 26px;
+}
+
+.post-button {
+  background: var(--twitter-blue);
+  color: white;
+  border: none;
+  border-radius: 9999px;
+  padding: 16px;
+  font-size: 17px;
+  font-weight: 700;
+  width: 90%;
+  margin: 16px auto;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.post-button:hover {
+  background: var(--twitter-blue-hover);
+}
+
+/* Center column - Main content */
+.main-content {
+  width: 600px;
+  border-left: 1px solid var(--twitter-border);
+  border-right: 1px solid var(--twitter-border);
+  min-height: 100vh;
+}
+
+/* Right sidebar */
+.sidebar-right {
+  width: 350px;
+  padding: 0 16px;
+}
+
+.search-box {
+  position: sticky;
+  top: 0;
+  background: var(--twitter-bg);
+  padding: 4px 0 16px;
+  z-index: 1;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 16px 12px 48px;
+  border-radius: 9999px;
+  border: none;
+  background: var(--twitter-light-gray);
+  font-size: 15px;
+}
+
+.search-input:focus {
+  outline: 1px solid var(--twitter-blue);
+  background: white;
+}
+
+/* Header */
+.page-header {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--twitter-border);
+  padding: 0 16px;
+  height: 53px;
+  display: flex;
+  align-items: center;
+  z-index: 2;
+}
+
+.page-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--twitter-black);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--twitter-border);
+}
+
+.tab {
+  flex: 1;
+  padding: 16px;
   text-align: center;
+  font-weight: 500;
+  color: var(--twitter-dark-gray);
+  cursor: pointer;
+  position: relative;
+  border: none;
+  background: transparent;
+  font-size: 15px;
 }
 
-.text-muted {
-  color: var(--text-muted);
+.tab:hover {
+  background: var(--twitter-hover-bg);
 }
 
-.mt-1 { margin-top: 1rem; }
-.mb-1 { margin-bottom: 1rem; }
-
-small {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  display: block;
-  margin-top: 0.25rem;
+.tab.active {
+  font-weight: 700;
+  color: var(--twitter-black);
 }
 
+.tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 4px;
+  background: var(--twitter-blue);
+  border-radius: 2px;
+}
+
+/* Compose box */
 .compose-box {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
-  margin-bottom: 2rem;
+  border-bottom: 1px solid var(--twitter-border);
+  padding: 12px 16px 16px;
 }
 
 .compose-box textarea {
   width: 100%;
-  min-height: 120px;
-  padding: 1rem;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-light);
-  font-size: 1rem;
+  border: none;
+  font-size: 20px;
   font-family: inherit;
-  resize: vertical;
+  resize: none;
+  min-height: 120px;
+  margin-top: 8px;
+  color: var(--twitter-black);
+}
+
+.compose-box textarea::placeholder {
+  color: var(--twitter-dark-gray);
 }
 
 .compose-box textarea:focus {
   outline: none;
-  border-color: var(--primary);
 }
 
 .compose-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 1rem;
+  padding-top: 12px;
+  border-top: 1px solid var(--twitter-border);
 }
 
-.char-counter {
-  color: var(--text-muted);
-  font-size: 0.9rem;
+.compose-actions {
+  display: flex;
+  gap: 4px;
 }
 
-.char-counter.warning {
-  color: #ff9800;
+.icon-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--twitter-blue);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
 }
 
-.char-counter.error {
-  color: var(--error);
+.icon-button:hover {
+  background: rgba(29, 155, 240, 0.1);
 }
 
-.compose-footer button {
-  width: auto;
-  padding: 0.75rem 2rem;
+.tweet-button {
+  background: var(--twitter-blue);
+  color: white;
+  border: none;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 80px;
+  cursor: pointer;
 }
 
+.tweet-button:hover:not(:disabled) {
+  background: var(--twitter-blue-hover);
+}
+
+.tweet-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Post card */
 .post-card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
-  margin-bottom: 1rem;
-  transition: background 0.2s;
+  border-bottom: 1px solid var(--twitter-border);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
 
 .post-card:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--twitter-hover-bg);
 }
 
 .post-header {
   display: flex;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.post-author {
-  font-weight: 600;
-  color: var(--text-light);
-  margin-right: 0.5rem;
-}
-
-.post-handle {
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.post-timestamp {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.post-content {
-  color: var(--text-light);
-  line-height: 1.5;
-  margin-bottom: 1rem;
-  word-wrap: break-word;
-}
-
-.post-actions {
-  display: flex;
-  gap: 2rem;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.post-action {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  transition: color 0.2s;
-}
-
-.post-action:hover {
-  color: var(--primary);
-}
-
-.post-action.liked {
-  color: #ff4444;
-}
-
-.empty-state {
-  text-align: center;
-  color: var(--text-muted);
-  padding: 3rem;
-}
-
-.nav-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.nav-bar button {
-  width: auto;
-  padding: 0.5rem 1.5rem;
-  font-size: 0.9rem;
+  gap: 12px;
 }
 
 .avatar {
@@ -1364,8 +1807,7 @@ small {
   height: 48px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid var(--border);
-  background: var(--input-bg);
+  flex-shrink: 0;
 }
 
 .avatar-sm {
@@ -1376,146 +1818,324 @@ small {
 .avatar-lg {
   width: 128px;
   height: 128px;
+  border: 4px solid white;
+  margin-top: -15%;
+  position: relative;
 }
 
-.profile-header {
+.post-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.post-author-row {
   display: flex;
-  gap: 1.5rem;
-  align-items: start;
-  padding: 2rem;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  margin-bottom: 2rem;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.post-author {
+  font-weight: 700;
+  color: var(--twitter-black);
+  font-size: 15px;
+}
+
+.post-author:hover {
+  text-decoration: underline;
+}
+
+.post-handle {
+  color: var(--twitter-dark-gray);
+  font-size: 15px;
+}
+
+.post-handle:hover {
+  text-decoration: underline;
+}
+
+.post-timestamp {
+  color: var(--twitter-dark-gray);
+  font-size: 15px;
+}
+
+.post-timestamp::before {
+  content: '·';
+  margin: 0 4px;
+}
+
+.post-content {
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--twitter-black);
+  margin-top: 2px;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.post-actions {
+  display: flex;
+  justify-content: space-between;
+  max-width: 425px;
+  margin-top: 12px;
+}
+
+.post-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--twitter-dark-gray);
+  font-size: 13px;
+  padding: 8px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.post-action:hover {
+  background: rgba(29, 155, 240, 0.1);
+  color: var(--twitter-blue);
+}
+
+.post-action.liked {
+  color: #F91880;
+}
+
+.post-action.liked:hover {
+  background: rgba(249, 24, 128, 0.1);
+}
+
+/* Profile */
+.profile-header {
+  position: relative;
+}
+
+.profile-banner {
+  width: 100%;
+  height: 200px;
+  background: var(--twitter-light-gray);
+  object-fit: cover;
 }
 
 .profile-info {
-  flex: 1;
+  padding: 12px 16px;
 }
 
-.profile-info h2 {
-  margin-bottom: 0.25rem;
+.profile-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.profile-name {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 24px;
+  color: var(--twitter-black);
+}
+
+.profile-handle {
+  font-size: 15px;
+  color: var(--twitter-dark-gray);
+  margin-bottom: 12px;
+}
+
+.profile-bio {
+  font-size: 15px;
+  line-height: 20px;
+  margin-bottom: 12px;
+}
+
+.profile-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--twitter-dark-gray);
+  font-size: 15px;
+  margin-bottom: 12px;
 }
 
 .profile-stats {
   display: flex;
-  gap: 1.5rem;
-  margin-top: 1rem;
-  color: var(--text-muted);
+  gap: 20px;
+  font-size: 15px;
 }
 
-.profile-stats span {
-  font-size: 0.9rem;
+.profile-stat {
+  color: var(--twitter-dark-gray);
 }
 
-.profile-stats strong {
-  color: var(--text-light);
-  font-weight: 600;
+.profile-stat strong {
+  color: var(--twitter-black);
+  font-weight: 700;
 }
 
-.profile-actions {
-  margin-top: 1.5rem;
-  display: flex;
-  gap: 1rem;
+.profile-stat:hover {
+  text-decoration: underline;
+  cursor: pointer;
 }
 
-.action-btn {
-  padding: 0.5rem 1.5rem;
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-  color: var(--text-light);
+/* Buttons */
+.btn-primary {
+  background: var(--twitter-black);
+  color: white;
   border: none;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
+  border-radius: 9999px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
-  width: auto;
+  min-width: 100px;
 }
 
-.action-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+.btn-primary:hover {
+  background: #272C30;
 }
 
-.action-btn-secondary {
-  padding: 0.5rem 1.5rem;
+.btn-secondary {
   background: transparent;
-  color: var(--error);
-  border: 1px solid var(--error);
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
+  color: var(--twitter-black);
+  border: 1px solid var(--twitter-border);
+  border-radius: 9999px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
-  width: auto;
+  min-width: 100px;
 }
 
-.action-btn-secondary:hover {
-  background: var(--error);
-  color: var(--text-light);
+.btn-secondary:hover {
+  background: var(--twitter-hover-bg);
 }
 
-.post-author-link,
-.post-handle-link {
-  text-decoration: none;
-  color: inherit;
+/* Widget boxes (right sidebar) */
+.widget-box {
+  background: var(--twitter-light-gray);
+  border-radius: 16px;
+  margin-bottom: 16px;
+  overflow: hidden;
 }
 
-.post-author-link:hover .post-author {
-  text-decoration: underline;
+.widget-header {
+  padding: 12px 16px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--twitter-black);
 }
 
-.post-handle-link:hover .post-handle {
-  text-decoration: underline;
-}
-
-.banner {
-  width: 100%;
-  height: 200px;
-  border-radius: 12px 12px 0 0;
-  margin-bottom: -3rem;
-}
-
-.clickable {
+.widget-item {
+  padding: 12px 16px;
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: background-color 0.2s;
 }
 
-.clickable:hover {
-  opacity: 0.9;
+.widget-item:hover {
+  background: var(--twitter-hover-bg);
 }
 
-.nav-links {
-  display: flex;
-  gap: 0.5rem;
+.widget-item-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--twitter-black);
+  margin-bottom: 2px;
 }
 
-.settings-section {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
-  margin-bottom: 2rem;
+.widget-item-meta {
+  font-size: 13px;
+  color: var(--twitter-dark-gray);
 }
 
-.settings-section h3 {
-  margin-bottom: 1.5rem;
-  color: var(--primary);
+/* Auth pages */
+.auth-container {
+  max-width: 600px;
+  margin: 48px auto;
+  padding: 48px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
 }
 
-.settings-section textarea {
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--twitter-dark-gray);
+  margin-bottom: 8px;
+}
+
+.form-group input {
   width: 100%;
-  padding: 0.75rem 1rem;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-light);
-  font-size: 1rem;
-  font-family: inherit;
-  resize: vertical;
+  padding: 12px 16px;
+  border: 1px solid var(--twitter-border);
+  border-radius: 4px;
+  font-size: 17px;
+  color: var(--twitter-black);
 }
 
-.settings-section textarea:focus {
+.form-group input:focus {
   outline: none;
-  border-color: var(--primary);
+  border-color: var(--twitter-blue);
+}
+
+.error {
+  color: var(--twitter-red);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.success {
+  color: #00BA7C;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.link {
+  color: var(--twitter-blue);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* Empty state */
+.empty-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--twitter-dark-gray);
+}
+
+/* Utilities */
+.mt-1 { margin-top: 8px; }
+.mb-1 { margin-bottom: 8px; }
+.text-muted { color: var(--twitter-dark-gray); }
+
+small {
+  font-size: 13px;
+  color: var(--twitter-dark-gray);
+  display: block;
+  margin-top: 4px;
+}
+
+/* Char counter */
+.char-counter {
+  font-size: 13px;
+  color: var(--twitter-dark-gray);
+}
+
+.char-counter.warning {
+  color: #FFD400;
+}
+
+.char-counter.error {
+  color: var(--twitter-red);
 }`;
   return new Response(css, {
     headers: { 'Content-Type': 'text/css' },
@@ -1523,7 +2143,7 @@ small {
 });
 
 // Serve API client JavaScript
-app.get('/js/api.js', (c) => {
+app.get('/js/api.js', (_c) => {
   const js = `const API_BASE = '/api';
 
 async function apiRequest(endpoint, options = {}) {
@@ -1757,6 +2377,118 @@ const social = {
   async getBlocked() {
     return await apiRequest('/users/me/blocked');
   },
+};
+
+const notifications = {
+  async getNotifications(cursor, limit = 20) {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (cursor) params.append('cursor', cursor);
+    return await apiRequest('/notifications?' + params.toString());
+  },
+
+  async getUnreadCount() {
+    return await apiRequest('/notifications/unread-count');
+  },
+
+  async markRead(notificationId) {
+    return await apiRequest('/notifications/' + notificationId + '/read', {
+      method: 'PUT',
+    });
+  },
+
+  async markAllRead() {
+    return await apiRequest('/notifications/read-all', {
+      method: 'PUT',
+    });
+  },
+};
+
+// WebSocket manager for real-time updates
+const ws = {
+  socket: null,
+  listeners: {},
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 5,
+  heartbeatInterval: null,
+  
+  connect() {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      console.error('Cannot connect WebSocket: No auth token');
+      return;
+    }
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = protocol + '//' + window.location.host + '/api/ws?token=' + token;
+    
+    this.socket = new WebSocket(wsUrl);
+    
+    this.socket.onopen = () => {
+      console.log('WebSocket connected');
+      this.reconnectAttempts = 0;
+      
+      // Start heartbeat
+      this.heartbeatInterval = setInterval(() => {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 30000); // Ping every 30 seconds
+    };
+    
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        // Emit event to listeners
+        if (this.listeners[data.type]) {
+          this.listeners[data.type].forEach(callback => callback(data));
+        }
+      } catch (error) {
+        console.error('WebSocket message error:', error);
+      }
+    };
+    
+    this.socket.onclose = () => {
+      console.log('WebSocket disconnected');
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+      }
+      
+      // Auto-reconnect with exponential backoff
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+        this.reconnectAttempts++;
+        setTimeout(() => this.connect(), delay);
+      }
+    };
+    
+    this.socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+  },
+  
+  disconnect() {
+    if (this.socket) {
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+      }
+      this.socket.close();
+      this.socket = null;
+    }
+  },
+  
+  on(eventType, callback) {
+    if (!this.listeners[eventType]) {
+      this.listeners[eventType] = [];
+    }
+    this.listeners[eventType].push(callback);
+  },
+  
+  off(eventType, callback) {
+    if (this.listeners[eventType]) {
+      this.listeners[eventType] = this.listeners[eventType].filter(cb => cb !== callback);
+    }
+  },
 };`;
   return new Response(js, {
     headers: { 'Content-Type': 'application/javascript' },
@@ -1805,31 +2537,25 @@ app.onError((err, c) => {
 export { UserDO } from './durable-objects/UserDO';
 export { PostDO } from './durable-objects/PostDO';
 export { FeedDO } from './durable-objects/FeedDO';
-
-export class CounterDO implements DurableObject {
-  constructor(private state: DurableObjectState, private env: Env) {}
-
-  async fetch(request: Request): Promise<Response> {
-    return new Response('CounterDO not yet implemented', { status: 501 });
-  }
-}
-
-export class WebSocketDO implements DurableObject {
-  constructor(private state: DurableObjectState, private env: Env) {}
-
-  async fetch(request: Request): Promise<Response> {
-    return new Response('WebSocketDO not yet implemented', { status: 501 });
-  }
-}
+export { WebSocketDO } from './durable-objects/WebSocketDO';
 
 // Export for Cloudflare Workers
 export default app;
+
+// Scheduled handler for cron triggers
+export async function scheduled(
+  event: ScheduledEvent,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> {
+  await handleScheduled(event, env, ctx);
+}
 
 // Queue consumer for fan-out processing
 export async function queue(
   batch: MessageBatch<import('./types/feed').FanOutMessage>,
   env: Env,
-  ctx: ExecutionContext
+  _ctx: ExecutionContext
 ): Promise<void> {
   for (const message of batch.messages) {
     try {
@@ -1856,7 +2582,11 @@ export async function queue(
         const authorDoId = env.USER_DO.idFromName(msg.authorId);
         const authorStub = env.USER_DO.get(authorDoId);
         const followersResp = await authorStub.fetch('https://do.internal/followers');
-        const followersData = await followersResp.json();
+        const followersData = await followersResp.json() as { followers: string[] };
+
+        // Get post metadata once for broadcasts
+        const postData = await env.POSTS_KV.get(`post:${msg.postId}`);
+        const postMetadata = postData ? JSON.parse(postData) : null;
 
         // Add to each follower's feed
         for (const followerId of followersData.followers) {
@@ -1875,9 +2605,45 @@ export async function queue(
               },
             }),
           });
+          
+          // Broadcast new post to follower's WebSocket connections
+          if (postMetadata) {
+            const wsDoId = env.WEBSOCKET_DO.idFromName(followerId);
+            const wsStub = env.WEBSOCKET_DO.get(wsDoId);
+            
+            await wsStub.fetch('https://do.internal/broadcast-post', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ post: postMetadata }),
+            });
+          }
         }
       } else if (msg.type === 'delete_post') {
-        console.log(`Post ${msg.postId} deleted`);
+        // Remove from author's feed
+        const authorFeedId = env.FEED_DO.idFromName(msg.authorId);
+        const authorFeedStub = env.FEED_DO.get(authorFeedId);
+        await authorFeedStub.fetch('https://do.internal/remove-entry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ postId: msg.postId }),
+        });
+
+        // Get author's followers and remove from their feeds
+        const authorDoId = env.USER_DO.idFromName(msg.authorId);
+        const authorStub = env.USER_DO.get(authorDoId);
+        const followersResp = await authorStub.fetch('https://do.internal/followers');
+        const followersData = await followersResp.json() as { followers: string[] };
+
+        for (const followerId of followersData.followers) {
+          const feedId = env.FEED_DO.idFromName(followerId);
+          const feedStub = env.FEED_DO.get(feedId);
+          
+          await feedStub.fetch('https://do.internal/remove-entry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: msg.postId }),
+          });
+        }
       }
 
       message.ack();

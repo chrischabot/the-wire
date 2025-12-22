@@ -5,6 +5,7 @@
 
 import type { Env } from '../types/env';
 import type { PostMetadata } from '../types/post';
+import { LIMITS } from '../constants';
 
 export interface FeedEntry {
   postId: string;
@@ -20,7 +21,6 @@ interface FeedState {
 
 export class FeedDO implements DurableObject {
   private state: FeedState | null = null;
-  private readonly MAX_ENTRIES = 1000;
 
   constructor(
     private durableState: DurableObjectState,
@@ -43,7 +43,7 @@ export class FeedDO implements DurableObject {
 
     this.state = {
       entries: [],
-      maxEntries: this.MAX_ENTRIES,
+      maxEntries: LIMITS.MAX_FEED_ENTRIES,
     };
     await this.saveState();
     return this.state;

@@ -238,6 +238,53 @@ export class UserDO implements DurableObject {
   }
 
   /**
+   * Ban user (admin action)
+   */
+  async ban(reason: string): Promise<void> {
+    const state = await this.ensureState();
+    state.profile.isBanned = true;
+    state.profile.bannedAt = Date.now();
+    state.profile.bannedReason = reason;
+    await this.saveState();
+  }
+
+  /**
+   * Unban user (admin action)
+   */
+  async unban(): Promise<void> {
+    const state = await this.ensureState();
+    state.profile.isBanned = false;
+    state.profile.bannedAt = undefined;
+    state.profile.bannedReason = undefined;
+    await this.saveState();
+  }
+
+  /**
+   * Check if user is banned
+   */
+  async isBanned(): Promise<boolean> {
+    const state = await this.ensureState();
+    return state.profile.isBanned || false;
+  }
+
+  /**
+   * Set admin status
+   */
+  async setAdmin(isAdmin: boolean): Promise<void> {
+    const state = await this.ensureState();
+    state.profile.isAdmin = isAdmin;
+    await this.saveState();
+  }
+
+  /**
+   * Check if user is admin
+   */
+  async isAdmin(): Promise<boolean> {
+    const state = await this.ensureState();
+    return state.profile.isAdmin || false;
+  }
+
+  /**
    * Handle HTTP fetch requests
    */
   async fetch(request: Request): Promise<Response> {
@@ -400,6 +447,45 @@ export class UserDO implements DurableObject {
       if (path === '/posts/decrement' && method === 'POST') {
         const count = await this.decrementPostCount();
         return new Response(JSON.stringify({ postCount: count }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Ban operations
+      if (path === '/ban' && method === 'POST') {
+        const body = await request.json() as { reason: string };
+        await this.ban(body.reason);
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (path === '/unban' && method === 'POST') {
+        await this.unban();
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (path === '/is-banned' && method === 'GET') {
+        const banned = await this.isBanned();
+        return new Response(JSON.stringify({ isBanned: banned }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Admin operations
+      if (path === '/set-admin' && method === 'POST') {
+        const body = await request.json() as { isAdmin: boolean };
+        await this.setAdmin(body.isAdmin);
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (path === '/is-admin' && method === 'GET') {
+        const admin = await this.isAdmin();
+        return new Response(JSON.stringify({ isAdmin: admin }), {
           headers: { 'Content-Type': 'application/json' },
         });
       }

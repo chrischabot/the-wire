@@ -41,13 +41,16 @@ bindings = [
   { name = "USER_DO", class_name = "UserDO" },
   { name = "POST_DO", class_name = "PostDO" },
   { name = "FEED_DO", class_name = "FeedDO" },
-  { name = "COUNTER_DO", class_name = "CounterDO" },
   { name = "WEBSOCKET_DO", class_name = "WebSocketDO" }
 ]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["UserDO", "PostDO", "FeedDO", "CounterDO", "WebSocketDO"]
+new_classes = ["UserDO", "PostDO", "FeedDO"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["WebSocketDO"]
 
 # Queues
 [[queues.producers]]

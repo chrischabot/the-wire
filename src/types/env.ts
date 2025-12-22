@@ -6,7 +6,6 @@
 export interface UserDO extends DurableObject {}
 export interface PostDO extends DurableObject {}
 export interface FeedDO extends DurableObject {}
-export interface CounterDO extends DurableObject {}
 export interface WebSocketDO extends DurableObject {}
 
 /**
@@ -26,7 +25,6 @@ export interface Env {
   USER_DO: DurableObjectNamespace;
   POST_DO: DurableObjectNamespace;
   FEED_DO: DurableObjectNamespace;
-  COUNTER_DO: DurableObjectNamespace;
   WEBSOCKET_DO: DurableObjectNamespace;
 
   // Queues
@@ -38,6 +36,11 @@ export interface Env {
   JWT_EXPIRY_HOURS: string;
   MAX_NOTE_LENGTH: string;
   FEED_PAGE_SIZE: string;
+
+  // Security settings
+  ALLOWED_ORIGINS?: string;
+  WORKER_URL?: string;
+  INITIAL_ADMIN_HANDLE?: string;
 }
 
 /**
