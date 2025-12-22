@@ -6,6 +6,7 @@
 export interface UserDO extends DurableObject {}
 export interface PostDO extends DurableObject {}
 export interface FeedDO extends DurableObject {}
+export interface WebSocketDO extends DurableObject {}
 
 /**
  * Main environment interface containing all bindings
@@ -24,6 +25,7 @@ export interface Env {
   USER_DO: DurableObjectNamespace;
   POST_DO: DurableObjectNamespace;
   FEED_DO: DurableObjectNamespace;
+  WEBSOCKET_DO: DurableObjectNamespace;
 
   // Queues
   FANOUT_QUEUE: Queue;

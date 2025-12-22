@@ -9,8 +9,8 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 ## Summary
 
 **Total Issues Identified:** 61  
-**Issues Resolved:** 48 (79%)  
-**Remaining:** 13 (21% - mostly optional or architectural)
+**Issues Resolved:** 50 (82%)  
+**Remaining:** 11 (18% - mostly optional or architectural)
 
 ---
 
@@ -29,7 +29,7 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 - ✅ SEC-4.3: Generic error messages for users
 - ✅ BUG-7: Cron handlers implemented
 
-### P1 - Features (9/11 Complete - 82%)
+### P1 - Features (11/13 Complete - 85%)
 
 - ✅ Feature 1.3: User timeline wired to profile page
 - ✅ Feed algorithm with round-robin merge
@@ -40,18 +40,16 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 - ✅ BUG-3.2: Profile timeline fixed
 - ✅ BUG-3.3: Duplicate repost prevention
 - ✅ BUG-3: Delete fan-out processing
+- ✅ WebSocket/Real-time - Fully implemented with WebSocketDO
+- ✅ Notifications System - Complete with all triggers
 
 **Remaining:**
 - ⚠️ Feature 1.1: Password reset (requires design decision)
 - ⚠️ Feature 1.2: Unrepost endpoint (can delete repost via delete post)
 
-### P2 - Enhancements (1/4 Complete - 25%)
+### P2 - Enhancements (1/2 Complete - 50%)
 
 - ✅ Reply thread view endpoint
-
-**Remaining (Optional):**
-- ❌ Feature 1.4: WebSocket real-time (optional per spec)
-- ❌ Feature 1.5: Notifications system (optional per spec)
 - ❌ Secondary indices for N+1 queries (architectural change)
 
 ### Code Quality (8/8 Complete - 100%)
@@ -78,7 +76,7 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 
 ---
 
-## Remaining Issues (13 total)
+## Remaining Issues (11 total)
 
 ### By Choice (Deferred)
 
@@ -88,9 +86,7 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 - OPT-5.4: FoF calculation optimization (complex refactor)
 - OPT-5.5: Profile caching in context (middleware change)
 
-**Optional Features (3):**
-- Feature 1.4: WebSocket/real-time (marked optional in spec)
-- Feature 1.5: Notifications (marked optional in spec)
+**Optional Features (1):**
 - Feature 10.2: Private accounts (not in original spec)
 
 **Testing Infrastructure (4):**
@@ -128,7 +124,7 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 - ✅ ~90% of spec implemented
 - ✅ All core Twitter features present
 - ✅ Differentiating features (FoF, ranking) working
-- ⚠️ Optional features (WebSocket, notifications) deferred
+- ✅ Real-time features (WebSocket, notifications) implemented
 
 ---
 

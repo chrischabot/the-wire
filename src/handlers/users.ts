@@ -13,6 +13,7 @@ import {
 } from '../utils/validation';
 import { requireAuth } from '../middleware/auth';
 import { LIMITS, BATCH_SIZE, CACHE_TTL } from '../constants';
+import { createNotification } from '../services/notifications';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -221,6 +222,12 @@ users.post('/:handle/follow', requireAuth, async (c) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId: currentUserId }),
+  });
+
+  await createNotification(c.env, {
+    userId: targetUserId,
+    type: 'follow',
+    actorId: currentUserId,
   });
 
   return c.json({ success: true, data: { message: 'Followed successfully' } });

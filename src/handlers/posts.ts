@@ -9,6 +9,7 @@ import { validateNoteContent } from '../utils/validation';
 import { generateId } from '../services/snowflake';
 import { requireAuth, optionalAuth } from '../middleware/auth';
 import { LIMITS, BATCH_SIZE } from '../constants';
+import { createNotification, createMentionNotifications } from '../services/notifications';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -99,6 +100,9 @@ posts.post('/', requireAuth, async (c) => {
     method: 'POST',
   });
 
+  // Detect and create mention notifications
+  await createMentionNotifications(c.env, body.content, userId, postId);
+
   // If this is a reply, increment parent's reply count
   if (body.replyToId) {
     const parentDoId = c.env.POST_DO.idFromName(body.replyToId);
@@ -106,6 +110,21 @@ posts.post('/', requireAuth, async (c) => {
     await parentStub.fetch('https://do.internal/replies/increment', {
       method: 'POST',
     });
+    
+    // Create reply notification for parent post author
+    const parentPostData = await c.env.POSTS_KV.get(`post:${body.replyToId}`);
+    if (parentPostData) {
+      const parentPost = JSON.parse(parentPostData);
+      if (parentPost.authorId !== userId) {
+        await createNotification(c.env, {
+          userId: parentPost.authorId,
+          type: 'reply',
+          actorId: userId,
+          postId: body.replyToId,
+          content: post.content.slice(0, 100),
+        });
+      }
+    }
   }
 
   // If this is a quote, increment parent's quote count
@@ -334,6 +353,16 @@ posts.post('/:id/like', requireAuth, async (c) => {
       const metadata: PostMetadata = JSON.parse(cached);
       metadata.likeCount = likeCount;
       await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(metadata));
+      
+      // Create like notification for post author
+      if (metadata.authorId !== userId) {
+        await createNotification(c.env, {
+          userId: metadata.authorId,
+          type: 'like',
+          actorId: userId,
+          postId,
+        });
+      }
     }
 
     return c.json({ success: true, data: { likeCount } });
@@ -514,6 +543,16 @@ posts.post('/:id/repost', requireAuth, async (c) => {
   await userStub.fetch('https://do.internal/posts/increment', {
     method: 'POST',
   });
+
+  // Create repost notification for original post author
+  if (originalPost.authorId !== userId) {
+    await createNotification(c.env, {
+      userId: originalPost.authorId,
+      type: 'repost',
+      actorId: userId,
+      postId,
+    });
+  }
 
   return c.json({ success: true, data: metadata }, 201);
 });

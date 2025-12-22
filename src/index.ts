@@ -13,6 +13,7 @@ import postsRoutes from './handlers/posts';
 import mediaRoutes from './handlers/media';
 import feedRoutes from './handlers/feed';
 import moderationRoutes from './handlers/moderation';
+import notificationsRoutes from './handlers/notifications';
 import { rateLimit, RATE_LIMITS } from './middleware/rate-limit';
 import { csrfProtection } from './middleware/csrf';
 import { handleScheduled } from './handlers/scheduled';
@@ -1117,9 +1118,61 @@ app.get('/api', (c) => {
         posts: '/api/posts/*',
         feed: '/api/feed/*',
         media: '/api/media/*',
+        notifications: '/api/notifications/*',
+        ws: '/api/ws (WebSocket)',
       },
     },
   });
+});
+
+/**
+ * WebSocket endpoint - Upgrade to WebSocket connection
+ * Query param: token (JWT for authentication)
+ */
+app.get('/api/ws', async (c) => {
+  const token = c.req.query('token');
+  
+  if (!token) {
+    return c.json({ success: false, error: 'Token required' }, 401);
+  }
+
+  // Verify JWT
+  const { verifyToken } = await import('./utils/jwt');
+  const { getJwtSecret } = await import('./middleware/auth');
+  
+  try {
+    const secret = getJwtSecret(c.env);
+    const payload = await verifyToken(token, secret);
+    
+    if (!payload) {
+      return c.json({ success: false, error: 'Invalid token' }, 401);
+    }
+
+    // Check if user is banned
+    const userDoId = c.env.USER_DO.idFromName(payload.sub);
+    const userStub = c.env.USER_DO.get(userDoId);
+    const bannedResp = await userStub.fetch('https://do.internal/is-banned');
+    const bannedData = await bannedResp.json() as { isBanned: boolean };
+    
+    if (bannedData.isBanned) {
+      return c.json({ success: false, error: 'Account banned' }, 403);
+    }
+
+    // Forward to user's WebSocketDO preserving upgrade semantics
+    const wsDoId = c.env.WEBSOCKET_DO.idFromName(payload.sub);
+    const wsStub = c.env.WEBSOCKET_DO.get(wsDoId);
+    
+    // Clone original request with /connect path
+    const originalReq = c.req.raw;
+    const url = new URL(originalReq.url);
+    url.pathname = '/connect';
+    const forwardedReq = new Request(url.toString(), originalReq);
+    
+    return await wsStub.fetch(forwardedReq);
+  } catch (error) {
+    console.error('WebSocket auth error:', error);
+    return c.json({ success: false, error: 'Authentication failed' }, 401);
+  }
 });
 
 // Mount auth routes
@@ -1139,6 +1192,9 @@ app.route('/api/media', mediaRoutes);
 
 // Mount moderation routes (admin only)
 app.route('/api/moderation', moderationRoutes);
+
+// Mount notifications routes
+app.route('/api/notifications', notificationsRoutes);
 
 // Serve media files
 app.route('/media', mediaRoutes);
@@ -1823,6 +1879,118 @@ const social = {
   async getBlocked() {
     return await apiRequest('/users/me/blocked');
   },
+};
+
+const notifications = {
+  async getNotifications(cursor, limit = 20) {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (cursor) params.append('cursor', cursor);
+    return await apiRequest('/notifications?' + params.toString());
+  },
+
+  async getUnreadCount() {
+    return await apiRequest('/notifications/unread-count');
+  },
+
+  async markRead(notificationId) {
+    return await apiRequest('/notifications/' + notificationId + '/read', {
+      method: 'PUT',
+    });
+  },
+
+  async markAllRead() {
+    return await apiRequest('/notifications/read-all', {
+      method: 'PUT',
+    });
+  },
+};
+
+// WebSocket manager for real-time updates
+const ws = {
+  socket: null,
+  listeners: {},
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 5,
+  heartbeatInterval: null,
+  
+  connect() {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      console.error('Cannot connect WebSocket: No auth token');
+      return;
+    }
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = protocol + '//' + window.location.host + '/api/ws?token=' + token;
+    
+    this.socket = new WebSocket(wsUrl);
+    
+    this.socket.onopen = () => {
+      console.log('WebSocket connected');
+      this.reconnectAttempts = 0;
+      
+      // Start heartbeat
+      this.heartbeatInterval = setInterval(() => {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 30000); // Ping every 30 seconds
+    };
+    
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        // Emit event to listeners
+        if (this.listeners[data.type]) {
+          this.listeners[data.type].forEach(callback => callback(data));
+        }
+      } catch (error) {
+        console.error('WebSocket message error:', error);
+      }
+    };
+    
+    this.socket.onclose = () => {
+      console.log('WebSocket disconnected');
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+      }
+      
+      // Auto-reconnect with exponential backoff
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+        this.reconnectAttempts++;
+        setTimeout(() => this.connect(), delay);
+      }
+    };
+    
+    this.socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+  },
+  
+  disconnect() {
+    if (this.socket) {
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+      }
+      this.socket.close();
+      this.socket = null;
+    }
+  },
+  
+  on(eventType, callback) {
+    if (!this.listeners[eventType]) {
+      this.listeners[eventType] = [];
+    }
+    this.listeners[eventType].push(callback);
+  },
+  
+  off(eventType, callback) {
+    if (this.listeners[eventType]) {
+      this.listeners[eventType] = this.listeners[eventType].filter(cb => cb !== callback);
+    }
+  },
 };`;
   return new Response(js, {
     headers: { 'Content-Type': 'application/javascript' },
@@ -1871,6 +2039,7 @@ app.onError((err, c) => {
 export { UserDO } from './durable-objects/UserDO';
 export { PostDO } from './durable-objects/PostDO';
 export { FeedDO } from './durable-objects/FeedDO';
+export { WebSocketDO } from './durable-objects/WebSocketDO';
 
 // Export for Cloudflare Workers
 export default app;
@@ -1917,6 +2086,10 @@ export async function queue(
         const followersResp = await authorStub.fetch('https://do.internal/followers');
         const followersData = await followersResp.json() as { followers: string[] };
 
+        // Get post metadata once for broadcasts
+        const postData = await env.POSTS_KV.get(`post:${msg.postId}`);
+        const postMetadata = postData ? JSON.parse(postData) : null;
+
         // Add to each follower's feed
         for (const followerId of followersData.followers) {
           const feedId = env.FEED_DO.idFromName(followerId);
@@ -1934,6 +2107,18 @@ export async function queue(
               },
             }),
           });
+          
+          // Broadcast new post to follower's WebSocket connections
+          if (postMetadata) {
+            const wsDoId = env.WEBSOCKET_DO.idFromName(followerId);
+            const wsStub = env.WEBSOCKET_DO.get(wsDoId);
+            
+            await wsStub.fetch('https://do.internal/broadcast-post', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ post: postMetadata }),
+            });
+          }
         }
       } else if (msg.type === 'delete_post') {
         // Remove from author's feed

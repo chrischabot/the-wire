@@ -300,17 +300,20 @@ Build a fully featured, globally distributed Twitter-like social network running
   - Time-limited reset tokens
   - Handle verification
 
-### P2 - Medium-term (Enhancement)
-
 - [ ] **WebSocket Real-time**
-  - Implement WebSocketDO
-  - Live feed updates
-  - Connection management
+  - Implement WebSocketDO with connection management
+  - Live feed updates via WebSocket broadcasts
+  - Real-time notifications delivery
+  - Connection state management per user
 
 - [ ] **Notifications System**
-  - @mention detection
-  - Like/reply/follow notifications
-  - Notification preferences
+  - NotificationDO or KV-based storage
+  - @mention detection in posts
+  - Like/reply/follow notification triggers
+  - Notification API endpoints (fetch, mark read)
+  - Real-time notification delivery via WebSocket
+
+### P2 - Medium-term (Enhancement)
 
 - [ ] **User Timeline Endpoint**
   - GET /api/users/:handle/posts
