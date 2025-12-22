@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # Development settings
 [dev]
-port = 8787
+port = 8080
 local_protocol = "http"
 
 # KV Namespaces
@@ -73,9 +73,11 @@ crons = [
 # Environment Variables
 [vars]
 ENVIRONMENT = "development"
+JWT_SECRET = "development-secret-key-change-in-production"
 JWT_EXPIRY_HOURS = "24"
 MAX_NOTE_LENGTH = "280"
 FEED_PAGE_SIZE = "20"
+ALLOWED_ORIGINS = "https://s4eyzk1ft4bh3qve.preview.maestro.igent.ai,http://localhost:8080,http://localhost:8787"
 
 # Production overrides
 [env.production]
