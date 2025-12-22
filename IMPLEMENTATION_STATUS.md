@@ -9,8 +9,8 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 ## Summary
 
 **Total Issues Identified:** 61  
-**Issues Resolved:** 50 (82%)  
-**Remaining:** 11 (18% - mostly optional or architectural)
+**Issues Resolved:** 51 (84%)  
+**Remaining:** 10 (16% - mostly optional or architectural)
 
 ---
 
@@ -29,7 +29,7 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 - ✅ SEC-4.3: Generic error messages for users
 - ✅ BUG-7: Cron handlers implemented
 
-### P1 - Features (11/13 Complete - 85%)
+### P1 - Features (12/13 Complete - 92%)
 
 - ✅ Feature 1.3: User timeline wired to profile page
 - ✅ Feed algorithm with round-robin merge
@@ -42,9 +42,9 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 - ✅ BUG-3: Delete fan-out processing
 - ✅ WebSocket/Real-time - Fully implemented with WebSocketDO
 - ✅ Notifications System - Complete with all triggers
+- ✅ Password Reset - Handle+email verification with time-limited tokens
 
 **Remaining:**
-- ⚠️ Feature 1.1: Password reset (requires design decision)
 - ⚠️ Feature 1.2: Unrepost endpoint (can delete repost via delete post)
 
 ### P2 - Enhancements (1/2 Complete - 50%)
@@ -76,7 +76,7 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 
 ---
 
-## Remaining Issues (11 total)
+## Remaining Issues (10 total)
 
 ### By Choice (Deferred)
 
@@ -144,9 +144,8 @@ This document tracks implementation status of findings from AUDIT_FINDINGS.md.
 **Recommended Next Steps:**
 1. Set up production monitoring (Cloudflare Analytics/APM)
 2. Run load tests to verify performance targets
-3. Add password reset flow (UX improvement)
-4. Implement secondary indices as user base grows
-5. Add comprehensive test coverage
+3. Implement secondary indices as user base grows
+4. Add comprehensive test coverage
 
 ---
 

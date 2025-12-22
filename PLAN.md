@@ -256,71 +256,71 @@ Build a fully featured, globally distributed Twitter-like social network running
 
 ### P0 - Immediate (Security Critical)
 
-- [ ] **Rate Limiting Middleware**
+- [x] **Rate Limiting Middleware**
   - KV-based rate limiter
   - 5 login attempts per IP per minute
   - 10 signups per IP per hour
   - 100 API requests per user per minute
 
-- [ ] **CSRF Protection**
+- [x] **CSRF Protection**
   - Origin header validation
   - SameSite cookie configuration
 
-- [ ] **Cron Handlers**
+- [x] **Cron Handlers**
   - Implement `scheduled()` export
   - FoF ranking updates (every 15 min)
   - Feed cleanup (hourly)
   - KV compaction (daily)
 
-- [ ] **Fix Media Serving**
+- [x] **Fix Media Serving**
   - Remove non-functional image resizing params
   - Generate absolute URLs
   - Add magic byte validation
 
 ### P1 - Short-term (Feature Completion)
 
-- [ ] **Feed Algorithm**
+- [x] **Feed Algorithm**
   - Implement FoF post fetching
   - Round-robin merge (2 followed + 1 FoF)
   - Hacker News-style ranking for FoF
 
-- [ ] **Moderation System**
+- [x] **Moderation System**
   - Admin roles and permissions
   - User ban functionality
   - Post takedown capability
   - Global ban enforcement
 
-- [ ] **Repost/Retweet**
+- [x] **Repost/Retweet**
   - POST /api/posts/:id/repost endpoint
   - Fan-out reposts to followers
   - Display reposts in feed
 
-- [ ] **Password Reset**
-  - Security question based (no email)
-  - Time-limited reset tokens
-  - Handle verification
+- [x] **Password Reset**
+  - Handle + email verification
+  - Time-limited reset tokens (15 min TTL)
+  - One-time use tokens
 
-- [ ] **WebSocket Real-time**
+- [x] **WebSocket Real-time**
   - Implement WebSocketDO with connection management
   - Live feed updates via WebSocket broadcasts
   - Real-time notifications delivery
   - Connection state management per user
 
-- [ ] **Notifications System**
-  - NotificationDO or KV-based storage
+- [x] **Notifications System**
+  - KV-based storage with 30-day TTL
   - @mention detection in posts
-  - Like/reply/follow notification triggers
-  - Notification API endpoints (fetch, mark read)
+  - Like/reply/follow/mention/repost notification triggers
+  - Notification API endpoints (fetch, mark read, unread count)
   - Real-time notification delivery via WebSocket
 
 ### P2 - Medium-term (Enhancement)
 
-- [ ] **User Timeline Endpoint**
+- [x] **User Timeline Endpoint**
   - GET /api/users/:handle/posts
   - Pagination support
   - Include replies option
 
-- [ ] **Reply Thread View**
+- [x] **Reply Thread View**
   - GET /api/posts/:id/thread
   - Recursive reply fetching
   - Thread pagination
