@@ -8,6 +8,7 @@ import type { Post } from '../types/post';
 interface PostState {
   post: Post;
   likes: string[];  // User IDs who liked this post
+  reposts: string[]; // User IDs who reposted this post
 }
 
 export class PostDO implements DurableObject {
@@ -25,6 +26,10 @@ export class PostDO implements DurableObject {
 
     const stored = await this.durableState.storage.get<PostState>('state');
     if (stored) {
+      // Backward compatibility: ensure reposts array exists
+      if (!Array.isArray((stored as any).reposts)) {
+        (stored as any).reposts = [];
+      }
       this.state = stored;
       return stored;
     }
@@ -47,6 +52,7 @@ export class PostDO implements DurableObject {
     this.state = {
       post,
       likes: [],
+      reposts: [],
     };
     await this.saveState();
   }
@@ -102,6 +108,41 @@ export class PostDO implements DurableObject {
     state.post.replyCount++;
     await this.saveState();
     return state.post.replyCount;
+  }
+
+  /**
+   * Add repost
+   */
+  async addRepost(userId: string): Promise<number> {
+    const state = await this.ensureState();
+    if (!state.reposts.includes(userId)) {
+      state.reposts.push(userId);
+      state.post.repostCount++;
+      await this.saveState();
+    }
+    return state.post.repostCount;
+  }
+
+  /**
+   * Remove repost
+   */
+  async removeRepost(userId: string): Promise<number> {
+    const state = await this.ensureState();
+    const index = state.reposts.indexOf(userId);
+    if (index > -1) {
+      state.reposts.splice(index, 1);
+      state.post.repostCount = Math.max(0, state.post.repostCount - 1);
+      await this.saveState();
+    }
+    return state.post.repostCount;
+  }
+
+  /**
+   * Check if user has reposted
+   */
+  async hasReposted(userId: string): Promise<boolean> {
+    const state = await this.ensureState();
+    return state.reposts.includes(userId);
   }
 
   /**
@@ -204,6 +245,39 @@ export class PostDO implements DurableObject {
       if (path === '/reposts/increment' && method === 'POST') {
         const count = await this.incrementRepostCount();
         return new Response(JSON.stringify({ repostCount: count }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Add repost
+      if (path === '/repost' && method === 'POST') {
+        const body = await request.json() as { userId: string };
+        const count = await this.addRepost(body.userId);
+        return new Response(JSON.stringify({ repostCount: count }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Remove repost
+      if (path === '/repost' && method === 'DELETE') {
+        const body = await request.json() as { userId: string };
+        const count = await this.removeRepost(body.userId);
+        return new Response(JSON.stringify({ repostCount: count }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Check if reposted
+      if (path === '/has-reposted' && method === 'GET') {
+        const userId = url.searchParams.get('userId');
+        if (!userId) {
+          return new Response(JSON.stringify({ error: 'userId required' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const hasReposted = await this.hasReposted(userId);
+        return new Response(JSON.stringify({ hasReposted }), {
           headers: { 'Content-Type': 'application/json' },
         });
       }

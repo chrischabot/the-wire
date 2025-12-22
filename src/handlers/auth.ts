@@ -102,7 +102,7 @@ auth.post('/signup', rateLimit(RATE_LIMITS.signup), async (c) => {
     postCount: 0,
     isVerified: false,
     isBanned: false,
-    isAdmin: false,
+    isAdmin: handle === c.env.INITIAL_ADMIN_HANDLE || false,
   };
 
   const defaultSettings: import('../types/user').UserSettings = {

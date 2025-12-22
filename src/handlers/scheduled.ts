@@ -8,6 +8,7 @@
  */
 
 import type { Env } from '../types/env';
+import { RETENTION, BATCH_SIZE, SCORING, LIMITS, CACHE_TTL } from '../constants';
 
 /**
  * Main scheduled handler
@@ -57,12 +58,12 @@ export async function handleScheduled(
 async function updateFoFRankings(env: Env): Promise<void> {
   console.log('Starting FoF ranking update...');
   
-  const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+  const oneDayAgo = Date.now() - RETENTION.FOF_RANKING_WINDOW;
   const rankedPosts: Array<{ postId: string; score: number; authorId: string }> = [];
   
   // Paginate through all posts using KV list with cursor
   let cursor: string | undefined;
-  const batchSize = 100;
+  const batchSize = BATCH_SIZE.KV_LIST;
   
   do {
     const listResult = await env.POSTS_KV.list({ 
@@ -83,8 +84,10 @@ async function updateFoFRankings(env: Env): Promise<void> {
       
       // Calculate Hacker News score
       const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
-      const points = post.likeCount + (post.replyCount * 2) + (post.repostCount * 1.5);
-      const score = points / Math.pow(ageHours + 2, 1.8);
+      const points = (post.likeCount * SCORING.LIKE_WEIGHT) + 
+                    (post.replyCount * SCORING.REPLY_WEIGHT) + 
+                    (post.repostCount * SCORING.REPOST_WEIGHT);
+      const score = points / Math.pow(ageHours + SCORING.HN_BASE_OFFSET, SCORING.HN_AGING_EXPONENT);
       
       return {
         postId: post.id,
@@ -105,9 +108,9 @@ async function updateFoFRankings(env: Env): Promise<void> {
   rankedPosts.sort((a, b) => b.score - a.score);
   
   // Store top 1000 ranked posts in KV for quick access
-  const topPosts = rankedPosts.slice(0, 1000);
+  const topPosts = rankedPosts.slice(0, LIMITS.MAX_FEED_ENTRIES);
   await env.FEEDS_KV.put('fof:ranked', JSON.stringify(topPosts), {
-    expirationTtl: 900, // 15 minutes
+    expirationTtl: CACHE_TTL.FOF_RANKINGS,
   });
   
   console.log(`Updated FoF rankings: ${topPosts.length} posts ranked`);
@@ -120,8 +123,7 @@ async function cleanupFeedEntries(env: Env): Promise<void> {
   console.log('Starting feed cleanup...');
   
   // Feed entries older than 7 days can be removed
-  const retentionPeriod = 7 * 24 * 60 * 60 * 1000;
-  const cutoffTime = Date.now() - retentionPeriod;
+  const cutoffTime = Date.now() - RETENTION.FEED_ENTRIES;
   
   let cursor: string | undefined;
   let cleanedCount = 0;
@@ -129,7 +131,7 @@ async function cleanupFeedEntries(env: Env): Promise<void> {
   do {
     const feedList = await env.FEEDS_KV.list({ 
       prefix: 'feed:', 
-      limit: 100,
+      limit: BATCH_SIZE.KV_LIST,
       cursor: cursor ?? null
     });
     
@@ -168,14 +170,14 @@ async function compactKVStorage(env: Env): Promise<void> {
   let sessionsCleaned = 0;
   let postsCleaned = 0;
   let rlCleaned = 0;
-  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  const cutoffTime = Date.now() - RETENTION.DELETED_POSTS;
   
   // Clean up deleted posts (marked as deleted but still in KV)
   let postCursor: string | undefined;
   do {
     const postList = await env.POSTS_KV.list({ 
       prefix: 'post:', 
-      limit: 100,
+      limit: BATCH_SIZE.KV_LIST,
       cursor: postCursor ?? null
     });
     
@@ -186,10 +188,10 @@ async function compactKVStorage(env: Env): Promise<void> {
       const post = JSON.parse(postData);
       
       // Remove posts deleted more than 30 days ago
-      if (post.isDeleted && post.deletedAt && post.deletedAt < thirtyDaysAgo) {
+      if (post.isDeleted && post.deletedAt && post.deletedAt < cutoffTime) {
         await env.POSTS_KV.delete(key.name);
         postsCleaned++;
-      } else if (post.isTakenDown && post.takenDownAt && post.takenDownAt < thirtyDaysAgo) {
+      } else if (post.isTakenDown && post.takenDownAt && post.takenDownAt < cutoffTime) {
         // Also clean up old takedowns
         await env.POSTS_KV.delete(key.name);
         postsCleaned++;
@@ -204,7 +206,7 @@ async function compactKVStorage(env: Env): Promise<void> {
   do {
     const rlList = await env.SESSIONS_KV.list({ 
       prefix: 'rl:', 
-      limit: 100,
+      limit: BATCH_SIZE.KV_LIST,
       cursor: rlCursor ?? null
     });
     

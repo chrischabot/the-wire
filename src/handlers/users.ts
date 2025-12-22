@@ -12,6 +12,7 @@ import {
   normalizeHandle,
 } from '../utils/validation';
 import { requireAuth } from '../middleware/auth';
+import { LIMITS, BATCH_SIZE, CACHE_TTL } from '../constants';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -47,7 +48,7 @@ users.get('/:handle', async (c) => {
     
     // Cache in KV (1 hour TTL)
     await c.env.USERS_KV.put(cacheKey, JSON.stringify(profile), {
-      expirationTtl: 3600,
+      expirationTtl: CACHE_TTL.PROFILE,
     });
     
     return c.json({ success: true, data: profile });
@@ -412,7 +413,7 @@ users.get('/me/blocked', requireAuth, async (c) => {
 users.get('/:handle/posts', async (c) => {
   const handle = normalizeHandle(c.req.param('handle'));
   const cursor = c.req.query('cursor');
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 50);
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
   const includeReplies = c.req.query('include_replies') === 'true';
 
   // Get user ID by handle
@@ -430,7 +431,7 @@ users.get('/:handle/posts', async (c) => {
   while (posts.length < limit) {
     const listResult = await c.env.POSTS_KV.list({
       prefix: 'post:',
-      limit: 100,
+      limit: BATCH_SIZE.KV_LIST,
       cursor: postCursor ?? null,
     });
 

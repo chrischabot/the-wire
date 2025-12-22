@@ -12,6 +12,7 @@ import type { Env } from '../types/env';
 import type { PostMetadata } from '../types/post';
 import { requireAuth } from '../middleware/auth';
 import { getFoFRankedPosts } from './scheduled';
+import { LIMITS } from '../constants';
 
 const feed = new Hono<{ Bindings: Env }>();
 
@@ -31,7 +32,7 @@ interface FeedPost extends PostMetadata {
 feed.get('/home', requireAuth, async (c) => {
   const userId = c.get('userId');
   const cursor = c.req.query('cursor');
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 50);
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
 
   try {
     // Get user's blocked list, muted words, and following list
@@ -144,7 +145,7 @@ feed.get('/home', requireAuth, async (c) => {
 feed.get('/chronological', requireAuth, async (c) => {
   const userId = c.get('userId');
   const cursor = c.req.query('cursor');
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 50);
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
 
   try {
     const userDoId = c.env.USER_DO.idFromName(userId);

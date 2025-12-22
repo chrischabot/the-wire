@@ -5,6 +5,7 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import type { Env } from './types/env';
 import authRoutes from './handlers/auth';
 import usersRoutes from './handlers/users';
@@ -21,6 +22,17 @@ const app = new Hono<{ Bindings: Env }>();
 
 // Global middleware
 app.use('*', cors());
+
+// Request body size limit (1MB for JSON, handled separately for multipart)
+app.use('/api/*', bodyLimit({
+  maxSize: 1024 * 1024, // 1MB
+  onError: (c) => {
+    return c.json({
+      success: false,
+      error: 'Request body too large',
+    }, 413);
+  },
+}));
 
 // CSRF protection for state-changing requests
 app.use('*', csrfProtection());
@@ -402,28 +414,31 @@ app.get('/home', (c) => {
     const composeSuccess = document.getElementById('compose-success');
     const timeline = document.getElementById('timeline');
 
-    let userPosts = [];
     let currentUser = null;
 
-    // Load posts from localStorage on page load
-    function loadPostsFromStorage() {
-      const stored = localStorage.getItem('user_posts');
-      if (stored) {
-        try {
-          userPosts = JSON.parse(stored);
-          renderTimeline();
-        } catch (error) {
-          console.error('Error loading posts from storage:', error);
-        }
-      }
-    }
-
-    // Save posts to localStorage
-    function savePostsToStorage() {
+    async function loadTimeline() {
       try {
-        localStorage.setItem('user_posts', JSON.stringify(userPosts));
+        timeline.innerHTML = '<div class="empty-state">Loading your timeline...</div>';
+        
+        const response = await fetch('/api/feed/home?limit=20', {
+          headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('auth_token'),
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to load feed');
+        }
+        
+        const feedData = await response.json();
+        if (feedData.success && feedData.data.posts) {
+          renderTimeline(feedData.data.posts);
+        } else {
+          timeline.innerHTML = '<div class="empty-state">No posts in your feed yet. Follow some users!</div>';
+        }
       } catch (error) {
-        console.error('Error saving posts to storage:', error);
+        console.error('Error loading timeline:', error);
+        timeline.innerHTML = '<div class="error">Error loading timeline. Please refresh.</div>';
       }
     }
 
@@ -484,13 +499,10 @@ app.get('/home', (c) => {
           charCounter.textContent = '0 / 280';
           charCounter.className = 'char-counter';
           
-          userPosts.unshift(response.data);
-          savePostsToStorage();
-          renderTimeline();
-          
           setTimeout(() => {
+            loadTimeline();
             composeSuccess.textContent = '';
-          }, 3000);
+          }, 1000);
         }
       } catch (error) {
         composeError.textContent = error.message;
@@ -500,19 +512,21 @@ app.get('/home', (c) => {
       }
     });
 
-    function renderTimeline() {
-      if (userPosts.length === 0) {
-        timeline.innerHTML = '<div class="empty-state">No notes yet. Be the first to post!</div>';
+    function renderTimeline(posts) {
+      if (!posts || posts.length === 0) {
+        timeline.innerHTML = '<div class="empty-state">No notes yet. Follow users to see their posts!</div>';
         return;
       }
 
-      timeline.innerHTML = userPosts.map(post => {
+      timeline.innerHTML = posts.map(post => {
         const date = new Date(post.createdAt);
         const timeStr = date.toLocaleTimeString() + ' · ' + date.toLocaleDateString();
         
         const avatarHtml = post.authorAvatarUrl 
           ? '<img src="' + post.authorAvatarUrl + '?width=48&quality=80" class="avatar" alt="' + post.authorDisplayName + '">'
           : '<div class="avatar" style="background: linear-gradient(135deg, #00d9ff, #0077ff);"></div>';
+        
+        const likedClass = post.hasLiked ? ' liked' : '';
         
         return '<div class="post-card" data-post-id="' + post.id + '">' +
           '<div class="post-header">' +
@@ -531,8 +545,8 @@ app.get('/home', (c) => {
           '</div>' +
           '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
           '<div class="post-actions">' +
-            '<span class="post-action" data-action="like" data-post-id="' + post.id + '">' +
-              '❤️ ' + post.likeCount +
+            '<span class="post-action' + likedClass + '" data-action="like" data-post-id="' + post.id + '">' +
+              '❤️ <span class="like-count">' + post.likeCount + '</span>' +
             '</span>' +
             '<span class="post-action">' +
               '💬 ' + post.replyCount +
@@ -547,21 +561,21 @@ app.get('/home', (c) => {
     }
 
     async function handleLike(e) {
-      const postId = e.currentTarget.dataset.postId;
-      const post = userPosts.find(p => p.id === postId);
-      if (!post) return;
+      const button = e.currentTarget;
+      const postId = button.dataset.postId;
+      const likeCountSpan = button.querySelector('.like-count');
+      const isLiked = button.classList.contains('liked');
 
       try {
-        if (post.hasLiked) {
+        if (isLiked) {
           await posts.unlike(postId);
-          post.likeCount--;
-          post.hasLiked = false;
+          button.classList.remove('liked');
+          likeCountSpan.textContent = parseInt(likeCountSpan.textContent) - 1;
         } else {
           await posts.like(postId);
-          post.likeCount++;
-          post.hasLiked = true;
+          button.classList.add('liked');
+          likeCountSpan.textContent = parseInt(likeCountSpan.textContent) + 1;
         }
-        renderTimeline();
       } catch (error) {
         console.error('Error liking post:', error);
       }
@@ -583,9 +597,8 @@ app.get('/home', (c) => {
       }
     });
 
-    renderTimeline();
+    loadTimeline();
     loadUserProfile();
-    loadPostsFromStorage();
   </script>
 </body>
 </html>
@@ -992,11 +1005,51 @@ app.get('/u/:handle', (c) => {
         '</div>' +
         '<div id="user-posts">' +
           '<h3>Posts</h3>' +
-          '<div class="empty-state">User post timeline will be available in Phase 7 (Feed System)</div>' +
+          '<div class="empty-state">Loading posts...</div>' +
         '</div>';
 
       if (!isOwnProfile && auth.isAuthenticated()) {
         setupSocialButtons();
+      }
+      
+      loadUserPosts();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    async function loadUserPosts() {
+      try {
+        const response = await fetch('/api/users/' + handle + '/posts?limit=20');
+        const data = await response.json();
+        
+        if (data.success && data.data.posts.length > 0) {
+          const postsHtml = data.data.posts.map(post => {
+            const date = new Date(post.createdAt);
+            const timeStr = date.toLocaleTimeString() + ' · ' + date.toLocaleDateString();
+            
+            return '<div class="post-card">' +
+              '<div class="post-header">' +
+                '<span class="post-timestamp">' + timeStr + '</span>' +
+              '</div>' +
+              '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
+              '<div class="post-actions">' +
+                '<span class="post-action">❤️ ' + post.likeCount + '</span>' +
+                '<span class="post-action">💬 ' + post.replyCount + '</span>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+          
+          document.getElementById('user-posts').innerHTML = '<h3>Posts</h3>' + postsHtml;
+        } else {
+          document.getElementById('user-posts').innerHTML = '<h3>Posts</h3><div class="empty-state">No posts yet</div>';
+        }
+      } catch (error) {
+        console.error('Error loading user posts:', error);
+        document.getElementById('user-posts').innerHTML = '<h3>Posts</h3><div class="error">Error loading posts</div>';
       }
     }
 
@@ -1818,22 +1871,6 @@ app.onError((err, c) => {
 export { UserDO } from './durable-objects/UserDO';
 export { PostDO } from './durable-objects/PostDO';
 export { FeedDO } from './durable-objects/FeedDO';
-
-export class CounterDO implements DurableObject {
-  constructor() {}
-
-  async fetch(_request: Request): Promise<Response> {
-    return new Response('CounterDO not yet implemented', { status: 501 });
-  }
-}
-
-export class WebSocketDO implements DurableObject {
-  constructor() {}
-
-  async fetch(_request: Request): Promise<Response> {
-    return new Response('WebSocketDO not yet implemented', { status: 501 });
-  }
-}
 
 // Export for Cloudflare Workers
 export default app;

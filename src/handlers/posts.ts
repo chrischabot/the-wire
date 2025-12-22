@@ -8,6 +8,7 @@ import type { Post, PostMetadata, CreatePostRequest } from '../types/post';
 import { validateNoteContent } from '../utils/validation';
 import { generateId } from '../services/snowflake';
 import { requireAuth, optionalAuth } from '../middleware/auth';
+import { LIMITS, BATCH_SIZE } from '../constants';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -158,7 +159,7 @@ posts.get('/:id', optionalAuth, async (c) => {
 posts.get('/:id/thread', optionalAuth, async (c) => {
   const postId = c.req.param('id');
   const userId = c.get('userId');
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 50);
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
 
   // Get the main post
   const mainPostData = await c.env.POSTS_KV.get(`post:${postId}`);
@@ -186,7 +187,7 @@ posts.get('/:id/thread', optionalAuth, async (c) => {
   const ancestors: any[] = [];
   let currentReplyTo = mainPost.replyToId;
   
-  while (currentReplyTo && ancestors.length < 10) {
+  while (currentReplyTo && ancestors.length < LIMITS.MAX_THREAD_DEPTH) {
     const parentData = await c.env.POSTS_KV.get(`post:${currentReplyTo}`);
     if (!parentData) break;
     
@@ -203,7 +204,7 @@ posts.get('/:id/thread', optionalAuth, async (c) => {
   while (replies.length < limit) {
     const listResult = await c.env.POSTS_KV.list({
       prefix: 'post:',
-      limit: 100,
+      limit: BATCH_SIZE.KV_LIST,
       cursor: cursor ?? null,
     });
 
@@ -409,6 +410,18 @@ posts.post('/:id/repost', requireAuth, async (c) => {
     return c.json({ success: false, error: 'Cannot repost this user\'s content' }, 403);
   }
 
+  // Check if already reposted
+  const originalDoId = c.env.POST_DO.idFromName(postId);
+  const originalStub = c.env.POST_DO.get(originalDoId);
+  const repostedCheckResp = await originalStub.fetch(
+    `https://do.internal/has-reposted?userId=${userId}`
+  );
+  const repostedData = await repostedCheckResp.json() as { hasReposted: boolean };
+  
+  if (repostedData.hasReposted) {
+    return c.json({ success: false, error: 'You have already reposted this' }, 409);
+  }
+
   // Create repost (a new post that references the original)
   const repostId = generateId();
   const now = Date.now();
@@ -468,16 +481,26 @@ posts.post('/:id/repost', requireAuth, async (c) => {
 
   await c.env.POSTS_KV.put(`post:${repostId}`, JSON.stringify(metadata));
 
-  // Increment repost count on original post
-  const originalDoId = c.env.POST_DO.idFromName(postId);
-  const originalStub = c.env.POST_DO.get(originalDoId);
-  await originalStub.fetch('https://do.internal/reposts/increment', {
+  // Add repost tracking and increment count on original post
+  const repostResp = await originalStub.fetch('https://do.internal/repost', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
   });
 
+  if (!repostResp.ok) {
+    return c.json({ success: false, error: 'Error updating repost count' }, 500);
+  }
+
+  const { repostCount } = await repostResp.json() as { repostCount: number };
+
   // Update original post's repost count in KV
-  originalPost.repostCount = (originalPost.repostCount || 0) + 1;
-  await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(originalPost));
+  const updatedOriginal = await c.env.POSTS_KV.get(`post:${postId}`);
+  if (updatedOriginal) {
+    const updatedPost = JSON.parse(updatedOriginal);
+    updatedPost.repostCount = repostCount;
+    await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(updatedPost));
+  }
 
   // Enqueue fan-out for the repost
   await c.env.FANOUT_QUEUE.send({
