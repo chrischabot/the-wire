@@ -3,7 +3,6 @@
  * Manages post state, likes, and interaction counters
  */
 
-import type { Env } from '../types/env';
 import type { Post } from '../types/post';
 
 interface PostState {
@@ -14,10 +13,7 @@ interface PostState {
 export class PostDO implements DurableObject {
   private state: PostState | null = null;
 
-  constructor(
-    private durableState: DurableObjectState,
-    private env: Env
-  ) {}
+  constructor(private durableState: DurableObjectState) {}
 
   /**
    * Lazy load state from durable storage

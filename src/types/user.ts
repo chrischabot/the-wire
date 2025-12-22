@@ -43,6 +43,10 @@ export interface UserProfile {
   followingCount: number;
   postCount: number;
   isVerified: boolean;
+  isBanned: boolean;
+  bannedAt?: number | undefined;
+  bannedReason?: string | undefined;
+  isAdmin: boolean;
 }
 
 /**

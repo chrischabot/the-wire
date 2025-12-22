@@ -202,7 +202,7 @@ users.post('/:handle/follow', requireAuth, async (c) => {
   const blockedCheckResponse = await targetStub.fetch(
     `https://do.internal/is-blocked?userId=${currentUserId}`
   );
-  const blockedData = await blockedCheckResponse.json();
+  const blockedData = await blockedCheckResponse.json() as { isBlocked: boolean };
   
   if (blockedData.isBlocked) {
     return c.json({ success: false, error: 'Cannot follow this user' }, 403);
@@ -269,21 +269,21 @@ users.get('/:handle/followers', async (c) => {
 
   const doId = c.env.USER_DO.idFromName(userId);
   const stub = c.env.USER_DO.get(doId);
-  const response = await stub.fetch('https://do.internal/followers');
-  const data = await response.json();
+  const followersResp = await stub.fetch('https://do.internal/followers');
+  const data = await followersResp.json() as { followers: string[] };
 
   const followers = await Promise.all(
     data.followers.map(async (followerId: string) => {
       const followerData = await c.env.USERS_KV.get(`user:${followerId}`);
       if (followerData) {
-        const authUser = JSON.parse(followerData);
+        const authUser: import('../types/user').AuthUser = JSON.parse(followerData);
         return { id: followerId, handle: authUser.handle };
       }
       return null;
     })
   );
 
-  const validFollowers = followers.filter((f) => f !== null);
+  const validFollowers = followers.filter((f): f is { id: string; handle: string } => f !== null);
 
   return c.json({
     success: true,
@@ -304,21 +304,21 @@ users.get('/:handle/following', async (c) => {
 
   const doId = c.env.USER_DO.idFromName(userId);
   const stub = c.env.USER_DO.get(doId);
-  const response = await stub.fetch('https://do.internal/following');
-  const data = await response.json();
+  const followingResp = await stub.fetch('https://do.internal/following');
+  const data = await followingResp.json() as { following: string[] };
 
   const following = await Promise.all(
     data.following.map(async (followingId: string) => {
       const followingData = await c.env.USERS_KV.get(`user:${followingId}`);
       if (followingData) {
-        const authUser = JSON.parse(followingData);
+        const authUser: import('../types/user').AuthUser = JSON.parse(followingData);
         return { id: followingId, handle: authUser.handle };
       }
       return null;
     })
   );
 
-  const validFollowing = following.filter((f) => f !== null);
+  const validFollowing = following.filter((f): f is { id: string; handle: string } => f !== null);
 
   return c.json({
     success: true,
@@ -384,25 +384,91 @@ users.get('/me/blocked', requireAuth, async (c) => {
 
   const doId = c.env.USER_DO.idFromName(userId);
   const stub = c.env.USER_DO.get(doId);
-  const response = await stub.fetch('https://do.internal/blocked');
-  const data = await response.json();
+  const blockedResp = await stub.fetch('https://do.internal/blocked');
+  const data = await blockedResp.json() as { blocked: string[] };
 
   const blocked = await Promise.all(
     data.blocked.map(async (blockedId: string) => {
       const blockedData = await c.env.USERS_KV.get(`user:${blockedId}`);
       if (blockedData) {
-        const authUser = JSON.parse(blockedData);
+        const authUser: import('../types/user').AuthUser = JSON.parse(blockedData);
         return { id: blockedId, handle: authUser.handle };
       }
       return null;
     })
   );
 
-  const validBlocked = blocked.filter((b) => b !== null);
+  const validBlocked = blocked.filter((b): b is { id: string; handle: string } => b !== null);
 
   return c.json({
     success: true,
     data: { blocked: validBlocked, count: validBlocked.length },
+  });
+});
+
+/**
+ * GET /api/users/:handle/posts - Get user's posts timeline
+ */
+users.get('/:handle/posts', async (c) => {
+  const handle = normalizeHandle(c.req.param('handle'));
+  const cursor = c.req.query('cursor');
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 50);
+  const includeReplies = c.req.query('include_replies') === 'true';
+
+  // Get user ID by handle
+  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+  if (!userId) {
+    return c.json({ success: false, error: 'User not found' }, 404);
+  }
+
+  // List all posts and filter by author
+  // In production, you'd want a secondary index for this
+  let postCursor: string | undefined = cursor ? atob(cursor) : undefined;
+  const posts: any[] = [];
+  
+  // Paginate through posts
+  while (posts.length < limit) {
+    const listResult = await c.env.POSTS_KV.list({
+      prefix: 'post:',
+      limit: 100,
+      cursor: postCursor ?? null,
+    });
+
+    for (const key of listResult.keys) {
+      if (posts.length >= limit) break;
+      
+      const postData = await c.env.POSTS_KV.get(key.name);
+      if (!postData) continue;
+      
+      const post = JSON.parse(postData);
+      
+      // Filter by author and optionally exclude replies
+      if (post.authorId === userId && !post.isDeleted) {
+        if (includeReplies || !post.replyToId) {
+          posts.push(post);
+        }
+      }
+    }
+
+    if (listResult.list_complete) break;
+    postCursor = listResult.cursor;
+  }
+
+  // Sort by creation time descending
+  posts.sort((a, b) => b.createdAt - a.createdAt);
+
+  // Calculate next cursor
+  const nextCursor = posts.length >= limit && postCursor 
+    ? btoa(postCursor) 
+    : null;
+
+  return c.json({
+    success: true,
+    data: {
+      posts: posts.slice(0, limit),
+      cursor: nextCursor,
+      hasMore: posts.length >= limit,
+    },
   });
 });
 

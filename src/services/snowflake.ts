@@ -13,7 +13,6 @@
 const EPOCH = 1704067200000n;
 
 // Bit lengths
-const TIMESTAMP_BITS = 41n;
 const WORKER_BITS = 10n;
 const SEQUENCE_BITS = 12n;
 

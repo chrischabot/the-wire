@@ -11,12 +11,22 @@ import usersRoutes from './handlers/users';
 import postsRoutes from './handlers/posts';
 import mediaRoutes from './handlers/media';
 import feedRoutes from './handlers/feed';
+import moderationRoutes from './handlers/moderation';
+import { rateLimit, RATE_LIMITS } from './middleware/rate-limit';
+import { csrfProtection } from './middleware/csrf';
+import { handleScheduled } from './handlers/scheduled';
 
 // Create Hono app with environment typing
 const app = new Hono<{ Bindings: Env }>();
 
 // Global middleware
 app.use('*', cors());
+
+// CSRF protection for state-changing requests
+app.use('*', csrfProtection());
+
+// General API rate limiting (100 req/min per IP)
+app.use('/api/*', rateLimit({ ...RATE_LIMITS.api, perUser: false }));
 
 // Health check endpoint
 app.get('/health', (c) => {
@@ -1074,11 +1084,14 @@ app.route('/api/feed', feedRoutes);
 // Mount media routes
 app.route('/api/media', mediaRoutes);
 
+// Mount moderation routes (admin only)
+app.route('/api/moderation', moderationRoutes);
+
 // Serve media files
 app.route('/media', mediaRoutes);
 
 // Serve CSS
-app.get('/css/styles.css', async (c) => {
+app.get('/css/styles.css', async (_c) => {
   const css = `* {
   margin: 0;
   padding: 0;
@@ -1523,7 +1536,7 @@ small {
 });
 
 // Serve API client JavaScript
-app.get('/js/api.js', (c) => {
+app.get('/js/api.js', (_c) => {
   const js = `const API_BASE = '/api';
 
 async function apiRequest(endpoint, options = {}) {
@@ -1807,17 +1820,17 @@ export { PostDO } from './durable-objects/PostDO';
 export { FeedDO } from './durable-objects/FeedDO';
 
 export class CounterDO implements DurableObject {
-  constructor(private state: DurableObjectState, private env: Env) {}
+  constructor() {}
 
-  async fetch(request: Request): Promise<Response> {
+  async fetch(_request: Request): Promise<Response> {
     return new Response('CounterDO not yet implemented', { status: 501 });
   }
 }
 
 export class WebSocketDO implements DurableObject {
-  constructor(private state: DurableObjectState, private env: Env) {}
+  constructor() {}
 
-  async fetch(request: Request): Promise<Response> {
+  async fetch(_request: Request): Promise<Response> {
     return new Response('WebSocketDO not yet implemented', { status: 501 });
   }
 }
@@ -1825,11 +1838,20 @@ export class WebSocketDO implements DurableObject {
 // Export for Cloudflare Workers
 export default app;
 
+// Scheduled handler for cron triggers
+export async function scheduled(
+  event: ScheduledEvent,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> {
+  await handleScheduled(event, env, ctx);
+}
+
 // Queue consumer for fan-out processing
 export async function queue(
   batch: MessageBatch<import('./types/feed').FanOutMessage>,
   env: Env,
-  ctx: ExecutionContext
+  _ctx: ExecutionContext
 ): Promise<void> {
   for (const message of batch.messages) {
     try {
@@ -1856,7 +1878,7 @@ export async function queue(
         const authorDoId = env.USER_DO.idFromName(msg.authorId);
         const authorStub = env.USER_DO.get(authorDoId);
         const followersResp = await authorStub.fetch('https://do.internal/followers');
-        const followersData = await followersResp.json();
+        const followersData = await followersResp.json() as { followers: string[] };
 
         // Add to each follower's feed
         for (const followerId of followersData.followers) {
@@ -1877,7 +1899,31 @@ export async function queue(
           });
         }
       } else if (msg.type === 'delete_post') {
-        console.log(`Post ${msg.postId} deleted`);
+        // Remove from author's feed
+        const authorFeedId = env.FEED_DO.idFromName(msg.authorId);
+        const authorFeedStub = env.FEED_DO.get(authorFeedId);
+        await authorFeedStub.fetch('https://do.internal/remove-entry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ postId: msg.postId }),
+        });
+
+        // Get author's followers and remove from their feeds
+        const authorDoId = env.USER_DO.idFromName(msg.authorId);
+        const authorStub = env.USER_DO.get(authorDoId);
+        const followersResp = await authorStub.fetch('https://do.internal/followers');
+        const followersData = await followersResp.json() as { followers: string[] };
+
+        for (const followerId of followersData.followers) {
+          const feedId = env.FEED_DO.idFromName(followerId);
+          const feedStub = env.FEED_DO.get(feedId);
+          
+          await feedStub.fetch('https://do.internal/remove-entry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: msg.postId }),
+          });
+        }
       }
 
       message.ack();

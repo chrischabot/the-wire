@@ -38,6 +38,10 @@ export interface Env {
   JWT_EXPIRY_HOURS: string;
   MAX_NOTE_LENGTH: string;
   FEED_PAGE_SIZE: string;
+
+  // Security settings
+  ALLOWED_ORIGINS?: string;
+  WORKER_URL?: string;
 }
 
 /**

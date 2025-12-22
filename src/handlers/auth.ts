@@ -16,13 +16,15 @@ import {
 } from '../utils/validation';
 import { generateId } from '../services/snowflake';
 import { requireAuth, getJwtSecret } from '../middleware/auth';
+import { rateLimit, RATE_LIMITS, accountLockout } from '../middleware/rate-limit';
 
 const auth = new Hono<{ Bindings: Env }>();
 
 /**
  * POST /api/auth/signup - Create a new account
+ * Rate limited: 10 signups per hour per IP
  */
-auth.post('/signup', async (c) => {
+auth.post('/signup', rateLimit(RATE_LIMITS.signup), async (c) => {
   let body: SignupRequest;
   try {
     body = await c.req.json<SignupRequest>();
@@ -99,6 +101,8 @@ auth.post('/signup', async (c) => {
     followingCount: 0,
     postCount: 0,
     isVerified: false,
+    isBanned: false,
+    isAdmin: false,
   };
 
   const defaultSettings: import('../types/user').UserSettings = {
@@ -134,8 +138,10 @@ auth.post('/signup', async (c) => {
 
 /**
  * POST /api/auth/login - Login with email and password
+ * Rate limited: 5 attempts per minute per IP
+ * Account lockout after 5 failed attempts
  */
-auth.post('/login', async (c) => {
+auth.post('/login', rateLimit(RATE_LIMITS.login), accountLockout(5, 15), async (c) => {
   let body: LoginRequest;
   try {
     body = await c.req.json<LoginRequest>();
