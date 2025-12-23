@@ -1,0 +1,68 @@
+graph TB
+    subgraph "Client Layer"
+        Browser["🌐 Web Browser<br/>(Any Device)"]
+        Mobile["📱 Mobile Browser"]
+    end
+
+    subgraph "Cloudflare Global Network<br/>300+ Locations Worldwide"
+        subgraph "Edge Layer"
+            Worker["⚡ Cloudflare Worker<br/>(Main Application)<br/>- Hono Router<br/>- Auth Middleware<br/>- Rate Limiting"]
+        end
+
+        subgraph "Durable Objects<br/>(Strong Consistency)"
+            UserDO["👤 UserDO<br/>- Profile Data<br/>- Followers/Following<br/>- Blocked Users"]
+            PostDO["📝 PostDO<br/>- Post State<br/>- Like Tracking<br/>- Engagement"]
+            FeedDO["📰 FeedDO<br/>- Timeline Entries<br/>- Feed Ranking<br/>- FoF Algorithm"]
+            WebSocketDO["🔌 WebSocketDO<br/>- Live Connections<br/>- Real-time Updates<br/>- Presence"]
+        end
+
+        subgraph "Storage Layer"
+            USERS_KV[("🗄️ USERS_KV<br/>Global Cache<br/>Profiles & Auth")]
+            POSTS_KV[("🗄️ POSTS_KV<br/>Global Cache<br/>Post Metadata")]
+            SESSIONS_KV[("🗄️ SESSIONS_KV<br/>Global Cache<br/>Active Sessions")]
+            FEEDS_KV[("🗄️ FEEDS_KV<br/>Global Cache<br/>Rankings")]
+            R2["📦 R2 Bucket<br/>Media Storage<br/>Avatars/Banners/Images"]
+        end
+
+        subgraph "Async Processing"
+            Queue["📬 FANOUT_QUEUE<br/>Post Distribution<br/>Fan-out to Followers"]
+            QueueConsumer["⚙️ Queue Consumer<br/>Batch Processing<br/>Feed Updates"]
+        end
+    end
+
+    Browser -->|"HTTPS Request"| Worker
+    Mobile -->|"HTTPS Request"| Worker
+    Browser -.->|"WebSocket"| Worker
+    
+    Worker -->|"Read/Write"| UserDO
+    Worker -->|"Read/Write"| PostDO
+    Worker -->|"Read/Write"| FeedDO
+    Worker -->|"WebSocket Upgrade"| WebSocketDO
+    
+    Worker -->|"Read (Fast)"| USERS_KV
+    Worker -->|"Read (Fast)"| POSTS_KV
+    Worker -->|"Read/Write"| SESSIONS_KV
+    Worker -->|"Read"| FEEDS_KV
+    Worker -->|"Upload/Download"| R2
+    
+    Worker -->|"Enqueue Message"| Queue
+    Queue -->|"Batch Delivery"| QueueConsumer
+    
+    UserDO -.->|"Write (on change)"| USERS_KV
+    PostDO -.->|"Write (on change)"| POSTS_KV
+    FeedDO -.->|"Write (on change)"| FEEDS_KV
+    
+    QueueConsumer -->|"Update Feeds"| FeedDO
+    QueueConsumer -->|"Broadcast"| WebSocketDO
+    
+    classDef edgeClass fill:#1D9BF0,stroke:#0077cc,color:#fff
+    classDef doClass fill:#F6821F,stroke:#cc6600,color:#fff
+    classDef storageClass fill:#00B388,stroke:#008866,color:#fff
+    classDef queueClass fill:#9333EA,stroke:#7928ca,color:#fff
+    classDef clientClass fill:#6B7280,stroke:#4B5563,color:#fff
+    
+    class Worker edgeClass
+    class UserDO,PostDO,FeedDO,WebSocketDO doClass
+    class USERS_KV,POSTS_KV,SESSIONS_KV,FEEDS_KV,R2 storageClass
+    class Queue,QueueConsumer queueClass
+    class Browser,Mobile clientClass
