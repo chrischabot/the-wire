@@ -114,3 +114,45 @@ const users = {
     });
   },
 };
+
+/**
+ * Theme management
+ */
+const theme = {
+  current: 'twitter',
+  
+  init() {
+    const saved = localStorage.getItem('the_wire_theme');
+    if (saved) {
+      this.apply(saved);
+    } else {
+      this.apply('twitter');
+    }
+  },
+  
+  apply(themeName) {
+    document.documentElement.setAttribute('data-theme', themeName);
+    this.current = themeName;
+    localStorage.setItem('the_wire_theme', themeName);
+  },
+  
+  get() {
+    return this.current;
+  },
+  
+  getAll() {
+    return [
+      { name: 'twitter', display: 'Twitter', desc: 'Pure black, Twitter blue' },
+      { name: 'vega', display: 'Vega', desc: 'Classic shadcn slate' },
+      { name: 'nova', display: 'Nova', desc: 'Compact & efficient' },
+      { name: 'maia', display: 'Maia', desc: 'Soft & rounded' },
+      { name: 'lyra', display: 'Lyra', desc: 'Boxy & monospace' },
+      { name: 'mira', display: 'Mira', desc: 'Ultra dense' }
+    ];
+  }
+};
+
+// Initialize theme on page load
+if (typeof window !== 'undefined') {
+  theme.init();
+}

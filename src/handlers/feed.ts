@@ -12,7 +12,7 @@ import type { Env } from '../types/env';
 import type { PostMetadata } from '../types/post';
 import { requireAuth } from '../middleware/auth';
 import { getFoFRankedPosts } from './scheduled';
-import { LIMITS } from '../constants';
+import { LIMITS, BATCH_SIZE } from '../constants';
 
 const feed = new Hono<{ Bindings: Env }>();
 
@@ -135,6 +135,97 @@ feed.get('/home', requireAuth, async (c) => {
     });
   } catch (error) {
     console.error('Error fetching home feed:', error);
+    return c.json({ success: false, error: 'Error fetching feed' }, 500);
+  }
+});
+
+/**
+ * GET /api/feed/global - Get global public feed for exploration
+ * Supports optional authentication to filter blocked users
+ */
+feed.get('/global', async (c) => {
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
+  const cursor = c.req.query('cursor');
+
+  // Optional authentication - get user ID if available
+  let userId: string | null = null;
+  let blockedUserIds: string[] = [];
+  
+  const authHeader = c.req.header('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.substring(7);
+      const { verifyToken } = await import('../utils/jwt');
+      const { getJwtSecret } = await import('../middleware/auth');
+      const secret = getJwtSecret(c.env);
+      const payload = await verifyToken(token, secret);
+      
+      if (payload) {
+        userId = payload.sub;
+        
+        // Get blocked users list
+        const userDoId = c.env.USER_DO.idFromName(userId);
+        const userStub = c.env.USER_DO.get(userDoId);
+        const blockedResp = await userStub.fetch('https://do.internal/blocked');
+        const blockedData = await blockedResp.json() as { blocked: string[] };
+        blockedUserIds = blockedData.blocked || [];
+      }
+    } catch (error) {
+      // Invalid token, proceed as unauthenticated
+      console.log('Invalid token in global feed, proceeding unauthenticated');
+    }
+  }
+
+  try {
+    let postCursor: string | undefined = cursor ? atob(cursor) : undefined;
+    const posts: PostMetadata[] = [];
+    
+    // Paginate through posts
+    while (posts.length < limit) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: 'post:',
+        limit: BATCH_SIZE.KV_LIST,
+        ...(postCursor ? { cursor: postCursor } : {}),
+      });
+
+      for (const key of listResult.keys) {
+        if (posts.length >= limit) break;
+        
+        const postData = await c.env.POSTS_KV.get(key.name);
+        if (!postData) continue;
+        
+        const post: PostMetadata = JSON.parse(postData);
+        
+        // Skip deleted posts
+        if (post.isDeleted) continue;
+        
+        // Skip posts from blocked users if authenticated
+        if (blockedUserIds.length > 0 && blockedUserIds.includes(post.authorId)) continue;
+        
+        posts.push(post);
+      }
+
+      if (listResult.list_complete) break;
+      postCursor = listResult.cursor;
+    }
+
+    // Sort by creation time descending
+    posts.sort((a, b) => b.createdAt - a.createdAt);
+
+    const nextCursor = posts.length >= limit && postCursor 
+      ? btoa(postCursor) 
+      : null;
+
+    return c.json({
+      success: true,
+      data: {
+        posts: posts.slice(0, limit),
+        cursor: nextCursor,
+        hasMore: posts.length >= limit,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching global feed:', error);
     return c.json({ success: false, error: 'Error fetching feed' }, 500);
   }
 });

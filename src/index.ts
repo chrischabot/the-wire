@@ -62,92 +62,106 @@ app.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>The Wire</title>
+  <title>The Wire - Share Notes Globally</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-    }
-    .container {
+    .hero {
       text-align: center;
-      padding: 2rem;
+      padding: 4rem 2rem;
+      max-width: 600px;
+      margin: 0 auto;
     }
-    h1 {
+    .hero h1 {
       font-size: 4rem;
       margin-bottom: 1rem;
-      background: linear-gradient(135deg, #00d9ff 0%, #0077ff 100%);
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+      font-weight: 800;
     }
     .tagline {
       font-size: 1.5rem;
-      color: #a0a0a0;
+      color: var(--muted-foreground);
       margin-bottom: 2rem;
     }
     .cta {
       display: inline-block;
-      padding: 1rem 2rem;
-      background: linear-gradient(135deg, #00d9ff 0%, #0077ff 100%);
-      color: #fff;
+      padding: 16px 32px;
+      background: var(--primary);
+      color: var(--primary-foreground);
       text-decoration: none;
-      border-radius: 50px;
-      font-weight: 600;
-      transition: transform 0.2s, box-shadow 0.2s;
+      border-radius: var(--radius-lg);
+      font-weight: 700;
+      font-size: 17px;
+      transition: var(--transition);
     }
     .cta:hover {
+      opacity: 0.9;
       transform: translateY(-2px);
-      box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
     }
     .features {
       margin-top: 3rem;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 1.5rem;
-      max-width: 800px;
+      max-width: 900px;
+      margin: 3rem auto 0;
+      padding: 0 2rem;
     }
     .feature {
       padding: 1.5rem;
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--muted);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      text-align: center;
+    }
+    .feature svg {
+      width: 48px;
+      height: 48px;
+      stroke: var(--primary);
+      margin-bottom: 1rem;
     }
     .feature h3 {
       margin-bottom: 0.5rem;
-      color: #00d9ff;
+      color: var(--foreground);
+      font-weight: 700;
     }
     .feature p {
       font-size: 0.9rem;
-      color: #888;
+      color: var(--muted-foreground);
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="hero">
+    <div class="logo" style="display: flex; justify-content: center; margin-bottom: 2rem;">
+      <svg viewBox="0 0 24 24" style="width: 60px; height: 60px; stroke: var(--foreground); fill: none; stroke-width: 2;"><circle cx="12" cy="12" r="10"/></svg>
+    </div>
     <h1>The Wire</h1>
     <p class="tagline">Share your notes with the world. Lightning fast.</p>
     <a href="/signup" class="cta">Get Started</a>
     <div class="features">
       <div class="feature">
-        <h3>⚡ Edge-Native</h3>
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <h3>Edge-Native</h3>
         <p>Powered by Cloudflare's global network for sub-50ms latency</p>
       </div>
       <div class="feature">
-        <h3>📝 Notes</h3>
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <h3>Notes</h3>
         <p>Share thoughts in 280 characters or less</p>
       </div>
       <div class="feature">
-        <h3>🌐 Global</h3>
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+        <h3>Global</h3>
         <p>Distributed infrastructure across 300+ locations</p>
       </div>
     </div>
   </div>
+
+  <script src="/js/api.js"></script>
 </body>
 </html>
   `;
@@ -164,17 +178,21 @@ app.get('/signup', (c) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign Up - The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
   <div class="auth-container">
-    <h1 class="text-center">Join The Wire</h1>
+    <div class="logo" style="text-align: center; margin-bottom: 24px;">
+      <svg viewBox="0 0 24 24" style="width: 40px; height: 40px; stroke: var(--foreground); fill: none; stroke-width: 2; margin: 0 auto;"><circle cx="12" cy="12" r="10"/></svg>
+    </div>
+    <h1 class="text-center" style="font-size: 31px; font-weight: 700; margin-bottom: 8px;">Join The Wire</h1>
     <p class="text-center text-muted" style="margin-bottom: 1rem;">
-      Create your account to start sharing notes
+      Create your account today
     </p>
 
-    <form id="signup-form">
+    <form id="signup-form" style="margin-top: 24px;">
       <div class="form-group">
-        <label for="handle">Handle</label>
+        <label for="handle">Username</label>
         <input 
           type="text" 
           id="handle" 
@@ -185,7 +203,7 @@ app.get('/signup', (c) => {
           minlength="3"
           maxlength="15"
         >
-        <small class="text-muted">3-15 characters, letters, numbers, and underscores</small>
+        <small>3-15 characters, letters, numbers, and underscores</small>
       </div>
 
       <div class="form-group">
@@ -209,18 +227,18 @@ app.get('/signup', (c) => {
           required
           minlength="8"
         >
-        <small class="text-muted">At least 8 characters with uppercase, lowercase, and number</small>
+        <small>At least 8 characters</small>
       </div>
 
       <div id="error-message" class="error"></div>
       <div id="success-message" class="success"></div>
 
-      <button type="submit" id="submit-btn">Create Account</button>
+      <button type="submit" class="btn-primary" style="width: 100%; margin-top: 12px;" id="submit-btn">Create account</button>
     </form>
 
-    <p class="text-center mt-1">
+    <p class="text-center mt-1" style="margin-top: 40px;">
       Already have an account? 
-      <a href="/login" class="link">Log in</a>
+      <a href="/login" class="link">Sign in</a>
     </p>
   </div>
 
@@ -255,7 +273,7 @@ app.get('/signup', (c) => {
       } catch (error) {
         errorMsg.textContent = error.message;
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Create Account';
+        submitBtn.textContent = 'Create account';
       }
     });
   </script>
@@ -274,15 +292,16 @@ app.get('/login', (c) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Log In - The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
   <div class="auth-container">
-    <h1 class="text-center">Welcome Back</h1>
-    <p class="text-center text-muted" style="margin-bottom: 1rem;">
-      Log in to The Wire
-    </p>
+    <div class="logo" style="text-align: center; margin-bottom: 24px;">
+      <svg viewBox="0 0 24 24" style="width: 40px; height: 40px; stroke: var(--foreground); fill: none; stroke-width: 2; margin: 0 auto;"><circle cx="12" cy="12" r="10"/></svg>
+    </div>
+    <h1 class="text-center" style="font-size: 31px; font-weight: 700; margin-bottom: 8px;">Sign in to The Wire</h1>
 
-    <form id="login-form">
+    <form id="login-form" style="margin-top: 32px;">
       <div class="form-group">
         <label for="email">Email</label>
         <input 
@@ -308,10 +327,10 @@ app.get('/login', (c) => {
       <div id="error-message" class="error"></div>
       <div id="success-message" class="success"></div>
 
-      <button type="submit" id="submit-btn">Log In</button>
+      <button type="submit" class="btn-primary" style="width: 100%; margin-top: 12px;" id="submit-btn">Sign in</button>
     </form>
 
-    <p class="text-center mt-1">
+    <p class="text-center mt-1" style="margin-top: 40px;">
       Don't have an account? 
       <a href="/signup" class="link">Sign up</a>
     </p>
@@ -330,7 +349,7 @@ app.get('/login', (c) => {
       errorMsg.textContent = '';
       successMsg.textContent = '';
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Logging in...';
+      submitBtn.textContent = 'Signing in...';
 
       const email = document.getElementById('email').value;
       const password = document.getElementById('password').value;
@@ -347,7 +366,7 @@ app.get('/login', (c) => {
       } catch (error) {
         errorMsg.textContent = error.message;
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Log In';
+        submitBtn.textContent = 'Sign in';
       }
     });
   </script>
@@ -366,37 +385,38 @@ app.get('/home', (c) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Home / The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
   <div class="twitter-layout">
     <!-- Left Sidebar -->
     <div class="sidebar-left">
-      <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
-      </div>
+      <a href="/home" class="logo">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+      </a>
       
       <a href="/home" class="nav-item active">
-        <span class="nav-icon">🏠</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         <span>Home</span>
       </a>
       <a href="/explore" class="nav-item">
-        <span class="nav-icon">🔍</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <span>Explore</span>
       </a>
       <a href="/notifications" class="nav-item">
-        <span class="nav-icon">🔔</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span>Notifications</span>
       </a>
-      <a href="/u/${c.get('userHandle') || 'me'}" class="nav-item">
-        <span class="nav-icon">👤</span>
+      <a href="#" class="nav-item" id="profile-nav">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>Profile</span>
       </a>
       <a href="/settings" class="nav-item">
-        <span class="nav-icon">⚙️</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         <span>Settings</span>
       </a>
       
-      <button class="post-button">Post</button>
+      <button class="post-button" onclick="document.getElementById('note-content').focus()">Post</button>
     </div>
 
     <!-- Main Content -->
@@ -422,9 +442,12 @@ app.get('/home', (c) => {
               ></textarea>
               <div class="compose-footer">
                 <div class="compose-actions">
-                  <button type="button" class="icon-button">📷</button>
-                  <button type="button" class="icon-button">😊</button>
-                  <button type="button" class="icon-button">📊</button>
+                  <button type="button" class="icon-button" title="Media">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                  </button>
+                  <button type="button" class="icon-button" title="Emoji">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>
+                  </button>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
                   <span id="char-counter" class="char-counter">0 / 280</span>
@@ -465,6 +488,18 @@ app.get('/home', (c) => {
     if (!auth.isAuthenticated()) {
       window.location.href = '/login';
     }
+
+    async function setProfileLink() {
+      try {
+        const response = await auth.me();
+        if (response.success) {
+          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+        }
+      } catch (error) {
+        console.error('Error getting profile:', error);
+      }
+    }
+    setProfileLink();
 
     const textarea = document.getElementById('note-content');
     const charCounter = document.getElementById('char-counter');
@@ -656,6 +691,364 @@ app.get('/home', (c) => {
 
     loadTimeline();
     loadUserProfile();
+  </script>
+</body>
+</html>
+  `);
+});
+
+// Explore page
+app.get('/explore', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Explore / The Wire</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="twitter-layout">
+    <!-- Left Sidebar -->
+    <div class="sidebar-left">
+      <a href="/home" class="logo">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+      </a>
+      
+      <a href="/home" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Home</span>
+      </a>
+      <a href="/explore" class="nav-item active">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>Explore</span>
+      </a>
+      <a href="/notifications" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span>Notifications</span>
+      </a>
+      <a href="#" class="nav-item" id="profile-nav">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Profile</span>
+      </a>
+      <a href="/settings" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Settings</span>
+      </a>
+      
+      <button class="post-button">Post</button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="page-header">
+        <h2>Explore</h2>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active">For you</button>
+        <button class="tab">Trending</button>
+        <button class="tab">News</button>
+        <button class="tab">Sports</button>
+      </div>
+
+      <div id="explore-content">
+        <div class="empty-state">Loading trending content...</div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="sidebar-right">
+      <div class="search-box">
+        <input type="text" class="search-input" placeholder="Search">
+      </div>
+      
+      <div class="widget-box">
+        <div class="widget-header">Trending</div>
+        <div id="trending-topics">
+          <div class="widget-item">
+            <div class="widget-item-meta">Trending · Technology</div>
+            <div class="widget-item-title">#CloudflareWorkers</div>
+            <div class="widget-item-meta">2.5K posts</div>
+          </div>
+          <div class="widget-item">
+            <div class="widget-item-meta">Trending · Web Development</div>
+            <div class="widget-item-title">#EdgeComputing</div>
+            <div class="widget-item-meta">1.8K posts</div>
+          </div>
+          <div class="widget-item">
+            <div class="widget-item-meta">Trending · Programming</div>
+            <div class="widget-item-title">#TypeScript</div>
+            <div class="widget-item-meta">3.2K posts</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    async function setProfileLink() {
+      try {
+        const response = await auth.me();
+        if (response.success) {
+          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+        }
+      } catch (error) {
+        console.error('Error getting profile:', error);
+      }
+    }
+    if (auth.isAuthenticated()) {
+      setProfileLink();
+    }
+
+    async function loadExploreFeed() {
+      try {
+        const headers = {};
+        if (auth.isAuthenticated()) {
+          headers['Authorization'] = 'Bearer ' + localStorage.getItem('auth_token');
+        }
+        
+        const response = await fetch('/api/feed/global?limit=20', { headers });
+        const data = await response.json();
+        
+        const exploreContent = document.getElementById('explore-content');
+        
+        if (data.success && data.data.posts && data.data.posts.length > 0) {
+          exploreContent.innerHTML = data.data.posts.map(post => {
+            const date = new Date(post.createdAt);
+            const timeStr = formatTimeAgo(date);
+            
+            const avatarHtml = post.authorAvatarUrl 
+              ? '<img src="' + post.authorAvatarUrl + '" class="avatar" alt="' + post.authorDisplayName + '">'
+              : '<div class="avatar" style="background: #1D9BF0;"></div>';
+            
+            return '<div class="post-card" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
+              '<div class="post-header">' +
+                '<a href="/u/' + post.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
+                '<div class="post-body">' +
+                  '<div class="post-author-row">' +
+                    '<a href="/u/' + post.authorHandle + '" class="post-author" onclick="event.stopPropagation()">' + escapeHtml(post.authorDisplayName) + '</a>' +
+                    '<a href="/u/' + post.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + post.authorHandle + '</a>' +
+                    '<span class="post-timestamp">' + timeStr + '</span>' +
+                  '</div>' +
+                  '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
+                  '<div class="post-actions" onclick="event.stopPropagation()">' +
+                    '<span class="post-action">' +
+                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+                      ' ' + post.replyCount +
+                    '</span>' +
+                    '<span class="post-action">' +
+                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
+                      ' ' + post.repostCount +
+                    '</span>' +
+                    '<span class="post-action">' +
+                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' +
+                      ' ' + post.likeCount +
+                    '</span>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+        } else {
+          exploreContent.innerHTML = '<div class="empty-state">No posts to explore yet.</div>';
+        }
+      } catch (error) {
+        console.error('Error loading explore feed:', error);
+        document.getElementById('explore-content').innerHTML = '<div class="error">Error loading explore feed</div>';
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function formatTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      if (seconds < 60) return seconds + 's';
+      if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+      if (seconds < 86400) return Math.floor(seconds / 3600) + 'h';
+      if (seconds < 604800) return Math.floor(seconds / 86400) + 'd';
+      return date.toLocaleDateString();
+    }
+
+    loadExploreFeed();
+  </script>
+</body>
+</html>
+  `);
+});
+
+// Notifications page
+app.get('/notifications', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Notifications / The Wire</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="twitter-layout">
+    <!-- Left Sidebar -->
+    <div class="sidebar-left">
+      <a href="/home" class="logo">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+      </a>
+      
+      <a href="/home" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Home</span>
+      </a>
+      <a href="/explore" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>Explore</span>
+      </a>
+      <a href="/notifications" class="nav-item active">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span>Notifications</span>
+      </a>
+      <a href="#" class="nav-item" id="profile-nav">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Profile</span>
+      </a>
+      <a href="/settings" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Settings</span>
+      </a>
+      
+      <button class="post-button">Post</button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="page-header">
+        <h2>Notifications</h2>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active">All</button>
+        <button class="tab">Mentions</button>
+      </div>
+
+      <div id="notifications-list">
+        <div class="empty-state">Loading notifications...</div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="sidebar-right">
+      <div class="search-box">
+        <input type="text" class="search-input" placeholder="Search">
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    if (!auth.isAuthenticated()) {
+      window.location.href = '/login';
+    }
+
+    async function setProfileLink() {
+      try {
+        const response = await auth.me();
+        if (response.success) {
+          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+        }
+      } catch (error) {
+        console.error('Error getting profile:', error);
+      }
+    }
+    setProfileLink();
+
+    async function loadNotifications() {
+      try {
+        const response = await notifications.getNotifications();
+        
+        const notificationsList = document.getElementById('notifications-list');
+        
+        if (response.success && response.data.notifications && response.data.notifications.length > 0) {
+          notificationsList.innerHTML = response.data.notifications.map(notif => {
+            const date = new Date(notif.createdAt);
+            const timeStr = formatTimeAgo(date);
+            
+            let iconSvg = '';
+            let notifText = '';
+            
+            switch (notif.type) {
+              case 'like':
+                iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="#F91880" stroke="#F91880" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>';
+                notifText = notif.actorDisplayName + ' liked your post';
+                break;
+              case 'repost':
+                iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00BA7C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
+                notifText = notif.actorDisplayName + ' reposted your post';
+                break;
+              case 'follow':
+                iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1D9BF0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+                notifText = notif.actorDisplayName + ' followed you';
+                break;
+              case 'reply':
+                iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1D9BF0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+                notifText = notif.actorDisplayName + ' replied to your post';
+                break;
+              default:
+                iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+                notifText = notif.actorDisplayName + ' interacted with your content';
+            }
+            
+            const avatarHtml = notif.actorAvatarUrl 
+              ? '<img src="' + notif.actorAvatarUrl + '" class="avatar avatar-sm" alt="' + notif.actorDisplayName + '">'
+              : '<div class="avatar avatar-sm" style="background: #1D9BF0;"></div>';
+            
+            return '<div class="post-card" style="cursor: default;">' +
+              '<div style="display: flex; gap: 12px;">' +
+                '<div style="width: 32px; flex-shrink: 0;">' + iconSvg + '</div>' +
+                '<div style="flex: 1;">' +
+                  '<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">' +
+                    avatarHtml +
+                    '<strong>' + escapeHtml(notifText) + '</strong>' +
+                  '</div>' +
+                  '<div style="color: var(--muted-foreground); font-size: 13px;">' + timeStr + '</div>' +
+                  (notif.postContent ? '<div style="margin-top: 8px; color: var(--muted-foreground); font-size: 14px;">' + escapeHtml(notif.postContent) + '</div>' : '') +
+                '</div>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+        } else {
+          notificationsList.innerHTML = '<div class="empty-state">No notifications yet</div>';
+        }
+      } catch (error) {
+        console.error('Error loading notifications:', error);
+        document.getElementById('notifications-list').innerHTML = '<div class="empty-state">No notifications yet</div>';
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function formatTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      if (seconds < 60) return seconds + 's ago';
+      if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+      if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+      if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
+      return date.toLocaleDateString();
+    }
+
+    loadNotifications();
   </script>
 </body>
 </html>
@@ -992,64 +1385,144 @@ app.get('/settings', (c) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Settings - The Wire</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
-  <div class="container">
-    <div class="nav-bar">
-      <h1 style="margin: 0;">The Wire</h1>
-      <div class="nav-links">
-        <button onclick="window.location.href='/home'">Home</button>
-        <button id="logout-btn">Log Out</button>
+  <div class="twitter-layout">
+    <!-- Left Sidebar -->
+    <div class="sidebar-left">
+      <a href="/home" class="logo">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+      </a>
+      
+      <a href="/home" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Home</span>
+      </a>
+      <a href="/explore" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <span>Explore</span>
+      </a>
+      <a href="/notifications" class="nav-item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span>Notifications</span>
+      </a>
+      <a href="#" class="nav-item" id="profile-nav">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Profile</span>
+      </a>
+      <a href="/settings" class="nav-item active">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Settings</span>
+      </a>
+      
+      <button class="post-button">Post</button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="page-header">
+        <h2>Settings</h2>
+      </div>
+
+      <div style="padding: 20px;">
+        <!-- Theme Selection -->
+        <div class="settings-section">
+          <h3>Appearance</h3>
+          <div class="theme-switcher">
+            <label class="theme-switcher-label">Choose your theme</label>
+            <div class="theme-options">
+              <div class="theme-option" data-theme="twitter">
+                <div class="theme-option-name">Twitter</div>
+                <div class="theme-option-desc">Pure black, blue accent</div>
+              </div>
+              <div class="theme-option" data-theme="vega">
+                <div class="theme-option-name">Vega</div>
+                <div class="theme-option-desc">Classic shadcn slate</div>
+              </div>
+              <div class="theme-option" data-theme="nova">
+                <div class="theme-option-name">Nova</div>
+                <div class="theme-option-desc">Compact & efficient</div>
+              </div>
+              <div class="theme-option" data-theme="maia">
+                <div class="theme-option-name">Maia</div>
+                <div class="theme-option-desc">Soft & rounded</div>
+              </div>
+              <div class="theme-option" data-theme="lyra">
+                <div class="theme-option-name">Lyra</div>
+                <div class="theme-option-desc">Boxy & monospace</div>
+              </div>
+              <div class="theme-option" data-theme="mira">
+                <div class="theme-option-name">Mira</div>
+                <div class="theme-option-desc">Ultra dense</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Profile Settings -->
+        <div class="settings-section">
+          <h3>Profile</h3>
+          <form id="profile-form">
+            <div class="form-group">
+              <label for="displayName">Display Name</label>
+              <input type="text" id="displayName" maxlength="50">
+            </div>
+
+            <div class="form-group">
+              <label for="bio">Bio</label>
+              <textarea id="bio" maxlength="160" rows="3"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="location">Location</label>
+              <input type="text" id="location" maxlength="50">
+            </div>
+
+            <div class="form-group">
+              <label for="website">Website</label>
+              <input type="url" id="website">
+            </div>
+
+            <button type="submit" class="btn-primary" id="save-profile-btn">Save Profile</button>
+          </form>
+          <div id="profile-success" class="success"></div>
+          <div id="profile-error" class="error"></div>
+        </div>
+
+        <!-- Avatar Upload -->
+        <div class="settings-section">
+          <h3>Avatar</h3>
+          <div id="current-avatar" class="avatar avatar-lg" style="margin-bottom: 1rem;"></div>
+          <input type="file" id="avatar-file" accept="image/*" style="margin-bottom: 1rem;">
+          <button class="btn-secondary" id="upload-avatar-btn">Upload Avatar</button>
+          <div id="avatar-success" class="success"></div>
+          <div id="avatar-error" class="error"></div>
+        </div>
+
+        <!-- Banner Upload -->
+        <div class="settings-section">
+          <h3>Banner</h3>
+          <div id="current-banner" class="profile-banner" style="margin-bottom: 1rem;"></div>
+          <input type="file" id="banner-file" accept="image/*" style="margin-bottom: 1rem;">
+          <button class="btn-secondary" id="upload-banner-btn">Upload Banner</button>
+          <div id="banner-success" class="success"></div>
+          <div id="banner-error" class="error"></div>
+        </div>
+
+        <!-- Account Actions -->
+        <div class="settings-section">
+          <h3>Account</h3>
+          <button class="btn-secondary" id="logout-btn">Log Out</button>
+        </div>
       </div>
     </div>
 
-    <h2>Settings</h2>
-    
-    <div class="settings-section">
-      <h3>Profile</h3>
-      <form id="profile-form">
-        <div class="form-group">
-          <label for="displayName">Display Name</label>
-          <input type="text" id="displayName" maxlength="50">
-        </div>
-
-        <div class="form-group">
-          <label for="bio">Bio</label>
-          <textarea id="bio" maxlength="160" rows="3"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="location">Location</label>
-          <input type="text" id="location" maxlength="50">
-        </div>
-
-        <div class="form-group">
-          <label for="website">Website</label>
-          <input type="url" id="website">
-        </div>
-
-        <button type="submit" id="save-profile-btn">Save Profile</button>
-      </form>
-      <div id="profile-success" class="success"></div>
-      <div id="profile-error" class="error"></div>
-    </div>
-
-    <div class="settings-section">
-      <h3>Avatar</h3>
-      <div id="current-avatar" class="avatar avatar-lg" style="margin-bottom: 1rem;"></div>
-      <input type="file" id="avatar-file" accept="image/*" style="margin-bottom: 1rem;">
-      <button id="upload-avatar-btn">Upload Avatar</button>
-      <div id="avatar-success" class="success"></div>
-      <div id="avatar-error" class="error"></div>
-    </div>
-
-    <div class="settings-section">
-      <h3>Banner</h3>
-      <div id="current-banner" class="banner" style="margin-bottom: 1rem;"></div>
-      <input type="file" id="banner-file" accept="image/*" style="margin-bottom: 1rem;">
-      <button id="upload-banner-btn">Upload Banner</button>
-      <div id="banner-success" class="success"></div>
-      <div id="banner-error" class="error"></div>
+    <!-- Right Sidebar -->
+    <div class="sidebar-right">
+      <div class="search-box">
+        <input type="text" class="search-input" placeholder="Search">
+      </div>
     </div>
   </div>
 
@@ -1058,6 +1531,31 @@ app.get('/settings', (c) => {
     if (!auth.isAuthenticated()) {
       window.location.href = '/login';
     }
+
+    async function setProfileLink() {
+      try {
+        const response = await auth.me();
+        if (response.success) {
+          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+        }
+      } catch (error) {
+        console.error('Error getting profile:', error);
+      }
+    }
+    setProfileLink();
+
+    const currentTheme = theme.get();
+    document.querySelectorAll('.theme-option').forEach(option => {
+      if (option.dataset.theme === currentTheme) {
+        option.classList.add('active');
+      }
+      
+      option.addEventListener('click', () => {
+        document.querySelectorAll('.theme-option').forEach(o => o.classList.remove('active'));
+        option.classList.add('active');
+        theme.apply(option.dataset.theme);
+      });
+    });
 
     let currentUser = null;
 
@@ -1083,6 +1581,7 @@ app.get('/settings', (c) => {
             if (currentUser.bannerUrl) {
               document.getElementById('current-banner').style.backgroundImage = 
                 'url(' + currentUser.bannerUrl + '?width=800&quality=85)';
+              document.getElementById('current-banner').style.backgroundSize = 'cover';
             }
           }
         }
@@ -1507,35 +2006,222 @@ app.route('/api/notifications', notificationsRoutes);
 // Serve media files
 app.route('/media', mediaRoutes);
 
-// Serve CSS
 app.get('/css/styles.css', async (_c) => {
-  const css = `* {
+  const css = `/* ============================================
+   THE WIRE - MULTI-THEME SYSTEM
+   shadcn/ui-inspired theming with Twitter precision
+   ============================================ */
+
+* {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-:root {
-  --twitter-blue: #1D9BF0;
-  --twitter-blue-hover: #1A8CD8;
-  --twitter-black: #0F1419;
-  --twitter-dark-gray: #536471;
-  --twitter-light-gray: #EFF3F4;
-  --twitter-bg: #FFFFFF;
-  --twitter-hover-bg: #F7F9F9;
-  --twitter-border: #EFF3F4;
-  --twitter-red: #F4212E;
+/* ============================================
+   THEME: Twitter (Default - Exact Match)
+   Pure black background, Twitter blue accent
+   ============================================ */
+:root,
+[data-theme='twitter'] {
+  --background: #000000;
+  --foreground: #E7E9EA;
+  --muted: #71767B;
+  --muted-foreground: #71767B;
+  --border: #2F3336;
+  --input: #2F3336;
+  --primary: #1D9BF0;
+  --primary-foreground: #FFFFFF;
+  --secondary: #16181C;
+  --secondary-foreground: #E7E9EA;
+  --accent: #16181C;
+  --accent-foreground: #E7E9EA;
+  --destructive: #F4212E;
+  --destructive-foreground: #FFFFFF;
+  --hover: #16181C;
+  --success: #00BA7C;
+  
+  --radius: 16px;
+  --radius-sm: 8px;
+  --radius-lg: 9999px;
+  
+  --sidebar-left-width: 275px;
+  --main-content-width: 600px;
+  --sidebar-right-width: 350px;
+  
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  
+  --transition: all 0.2s ease;
 }
 
+/* ============================================
+   THEME: Vega (Classic shadcn)
+   ============================================ */
+[data-theme='vega'] {
+  --background: #FFFFFF;
+  --foreground: #0F172A;
+  --muted: #F1F5F9;
+  --muted-foreground: #64748B;
+  --border: #E2E8F0;
+  --input: #E2E8F0;
+  --primary: #0F172A;
+  --primary-foreground: #F8FAFC;
+  --secondary: #F1F5F9;
+  --secondary-foreground: #0F172A;
+  --accent: #F1F5F9;
+  --accent-foreground: #0F172A;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --hover: #F8FAFC;
+  --success: #10B981;
+  
+  --radius: 8px;
+  --radius-sm: 4px;
+  --radius-lg: 12px;
+  
+  --sidebar-left-width: 275px;
+  --main-content-width: 600px;
+  --sidebar-right-width: 350px;
+}
+
+/* ============================================
+   THEME: Nova (Compact)
+   ============================================ */
+[data-theme='nova'] {
+  --background: #FAFAFA;
+  --foreground: #171717;
+  --muted: #F5F5F5;
+  --muted-foreground: #737373;
+  --border: #E5E5E5;
+  --input: #E5E5E5;
+  --primary: #18181B;
+  --primary-foreground: #FAFAFA;
+  --secondary: #F5F5F5;
+  --secondary-foreground: #18181B;
+  --accent: #F5F5F5;
+  --accent-foreground: #18181B;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --hover: #FAFAFA;
+  --success: #16A34A;
+  
+  --radius: 6px;
+  --radius-sm: 3px;
+  --radius-lg: 8px;
+  
+  --sidebar-left-width: 240px;
+  --main-content-width: 580px;
+  --sidebar-right-width: 320px;
+}
+
+/* ============================================
+   THEME: Maia (Soft & Rounded)
+   ============================================ */
+[data-theme='maia'] {
+  --background: #FEFEFE;
+  --foreground: #2D3748;
+  --muted: #F7FAFC;
+  --muted-foreground: #718096;
+  --border: #E2E8F0;
+  --input: #EDF2F7;
+  --primary: #4299E1;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDF2F7;
+  --secondary-foreground: #2D3748;
+  --accent: #BEE3F8;
+  --accent-foreground: #2C5282;
+  --destructive: #F56565;
+  --destructive-foreground: #FFFFFF;
+  --hover: #F7FAFC;
+  --success: #48BB78;
+  
+  --radius: 16px;
+  --radius-sm: 12px;
+  --radius-lg: 24px;
+  
+  --sidebar-left-width: 275px;
+  --main-content-width: 600px;
+  --sidebar-right-width: 350px;
+}
+
+/* ============================================
+   THEME: Lyra (Boxy & Mono)
+   ============================================ */
+[data-theme='lyra'] {
+  --background: #FFFFFF;
+  --foreground: #000000;
+  --muted: #F5F5F5;
+  --muted-foreground: #666666;
+  --border: #000000;
+  --input: #FFFFFF;
+  --primary: #000000;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F5F5F5;
+  --secondary-foreground: #000000;
+  --accent: #EEEEEE;
+  --accent-foreground: #000000;
+  --destructive: #FF0000;
+  --destructive-foreground: #FFFFFF;
+  --hover: #F5F5F5;
+  --success: #00CC00;
+  
+  --radius: 2px;
+  --radius-sm: 0px;
+  --radius-lg: 4px;
+  
+  --font-sans: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  
+  --sidebar-left-width: 275px;
+  --main-content-width: 600px;
+  --sidebar-right-width: 350px;
+}
+
+/* ============================================
+   THEME: Mira (Ultra Dense)
+   ============================================ */
+[data-theme='mira'] {
+  --background: #FCFCFC;
+  --foreground: #1A1A1A;
+  --muted: #F0F0F0;
+  --muted-foreground: #6B6B6B;
+  --border: #DEDEDE;
+  --input: #F0F0F0;
+  --primary: #2563EB;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F0F0F0;
+  --secondary-foreground: #1A1A1A;
+  --accent: #DBEAFE;
+  --accent-foreground: #1E40AF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --hover: #FAFAFA;
+  --success: #059669;
+  
+  --radius: 4px;
+  --radius-sm: 2px;
+  --radius-lg: 6px;
+  
+  --sidebar-left-width: 220px;
+  --main-content-width: 560px;
+  --sidebar-right-width: 300px;
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  background: var(--twitter-bg);
-  color: var(--twitter-black);
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
   font-size: 15px;
   line-height: 20px;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Main layout - 3 columns */
+/* ============================================
+   LAYOUT - 3 COLUMN TWITTER STRUCTURE
+   ============================================ */
 .twitter-layout {
   display: flex;
   max-width: 1265px;
@@ -1543,135 +2229,254 @@ body {
   min-height: 100vh;
 }
 
-/* Left sidebar - Navigation */
 .sidebar-left {
-  width: 275px;
+  width: var(--sidebar-left-width);
   padding: 0 12px;
   display: flex;
   flex-direction: column;
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
+}
+
+[data-theme='nova'] .sidebar-left,
+[data-theme='mira'] .sidebar-left {
+  padding: 0 8px;
+}
+
+[data-theme='maia'] .sidebar-left {
+  padding: 0 16px;
 }
 
 .logo {
   padding: 12px;
   margin-bottom: 4px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+[data-theme='mira'] .logo {
+  padding: 6px;
 }
 
 .logo svg {
   width: 30px;
   height: 30px;
-  fill: var(--twitter-black);
+  stroke: var(--foreground);
+  fill: none;
+  stroke-width: 2;
+}
+
+[data-theme='nova'] .logo svg,
+[data-theme='mira'] .logo svg {
+  width: 24px;
+  height: 24px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 12px;
-  border-radius: 9999px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
   text-decoration: none;
-  color: var(--twitter-black);
+  color: var(--foreground);
   font-size: 20px;
   font-weight: 400;
   margin-bottom: 4px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: var(--transition);
+  border: 1px solid transparent;
+}
+
+[data-theme='nova'] .nav-item,
+[data-theme='mira'] .nav-item {
+  padding: 8px 12px;
+  font-size: 16px;
+}
+
+[data-theme='maia'] .nav-item {
+  padding: 14px 20px;
+  margin-bottom: 8px;
+}
+
+[data-theme='lyra'] .nav-item {
+  border-radius: var(--radius);
 }
 
 .nav-item:hover {
-  background: var(--twitter-hover-bg);
+  background: var(--hover);
+}
+
+[data-theme='lyra'] .nav-item:hover {
+  border-color: var(--border);
+  background: transparent;
 }
 
 .nav-item.active {
   font-weight: 700;
 }
 
-.nav-icon {
+.nav-item svg {
   width: 26px;
   height: 26px;
   margin-right: 20px;
-  font-size: 26px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  flex-shrink: 0;
+}
+
+[data-theme='nova'] .nav-item svg,
+[data-theme='mira'] .nav-item svg {
+  width: 20px;
+  height: 20px;
+  margin-right: 12px;
+}
+
+[data-theme='maia'] .nav-item svg {
+  width: 28px;
+  height: 28px;
+  margin-right: 24px;
 }
 
 .post-button {
-  background: var(--twitter-blue);
-  color: white;
+  background: var(--primary);
+  color: var(--primary-foreground);
   border: none;
-  border-radius: 9999px;
+  border-radius: var(--radius-lg);
   padding: 16px;
   font-size: 17px;
   font-weight: 700;
   width: 90%;
   margin: 16px auto;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: var(--transition);
+}
+
+[data-theme='nova'] .post-button,
+[data-theme='mira'] .post-button {
+  padding: 10px;
+  font-size: 15px;
+  margin: 8px auto;
+}
+
+[data-theme='maia'] .post-button {
+  padding: 18px;
+  margin: 20px auto;
+}
+
+[data-theme='lyra'] .post-button {
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
 }
 
 .post-button:hover {
-  background: var(--twitter-blue-hover);
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
-/* Center column - Main content */
+[data-theme='lyra'] .post-button:hover {
+  transform: none;
+}
+
 .main-content {
-  width: 600px;
-  border-left: 1px solid var(--twitter-border);
-  border-right: 1px solid var(--twitter-border);
+  width: var(--main-content-width);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   min-height: 100vh;
 }
 
-/* Right sidebar */
+[data-theme='lyra'] .main-content {
+  border-width: 2px;
+}
+
 .sidebar-right {
-  width: 350px;
+  width: var(--sidebar-right-width);
   padding: 0 16px;
 }
 
-.search-box {
-  position: sticky;
-  top: 0;
-  background: var(--twitter-bg);
-  padding: 4px 0 16px;
-  z-index: 1;
+[data-theme='nova'] .sidebar-right,
+[data-theme='mira'] .sidebar-right {
+  padding: 0 12px;
 }
 
-.search-input {
-  width: 100%;
-  padding: 12px 16px 12px 48px;
-  border-radius: 9999px;
-  border: none;
-  background: var(--twitter-light-gray);
-  font-size: 15px;
+[data-theme='maia'] .sidebar-right {
+  padding: 0 20px;
 }
 
-.search-input:focus {
-  outline: 1px solid var(--twitter-blue);
-  background: white;
-}
-
-/* Header */
+/* ============================================
+   HEADER
+   ============================================ */
 .page-header {
   position: sticky;
   top: 0;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--twitter-border);
+  border-bottom: 1px solid var(--border);
   padding: 0 16px;
   height: 53px;
   display: flex;
   align-items: center;
-  z-index: 2;
+  z-index: 10;
+}
+
+[data-theme='vega'] .page-header,
+[data-theme='nova'] .page-header,
+[data-theme='maia'] .page-header,
+[data-theme='lyra'] .page-header,
+[data-theme='mira'] .page-header {
+  background: var(--background);
+  backdrop-filter: none;
+}
+
+[data-theme='nova'] .page-header,
+[data-theme='mira'] .page-header {
+  height: 48px;
+  padding: 0 12px;
+}
+
+[data-theme='lyra'] .page-header {
+  border-width: 2px;
 }
 
 .page-header h2 {
   font-size: 20px;
-  font-weight: 700;
-  color: var(--twitter-black);
+  font-weight: 800;
+  color: var(--foreground);
 }
 
-/* Tabs */
+[data-theme='nova'] .page-header h2,
+[data-theme='mira'] .page-header h2 {
+  font-size: 18px;
+}
+
+.page-header button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  margin-right: 24px;
+  color: var(--foreground);
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  transition: var(--transition);
+}
+
+.page-header button:hover {
+  background: var(--hover);
+}
+
+/* ============================================
+   TABS
+   ============================================ */
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--twitter-border);
+  border-bottom: 1px solid var(--border);
+}
+
+[data-theme='lyra'] .tabs {
+  border-width: 2px;
 }
 
 .tab {
@@ -1679,21 +2484,32 @@ body {
   padding: 16px;
   text-align: center;
   font-weight: 500;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   cursor: pointer;
   position: relative;
   border: none;
   background: transparent;
   font-size: 15px;
+  transition: var(--transition);
+}
+
+[data-theme='nova'] .tab,
+[data-theme='mira'] .tab {
+  padding: 12px 8px;
+  font-size: 14px;
+}
+
+[data-theme='maia'] .tab {
+  padding: 20px;
 }
 
 .tab:hover {
-  background: var(--twitter-hover-bg);
+  background: var(--hover);
 }
 
 .tab.active {
   font-weight: 700;
-  color: var(--twitter-black);
+  color: var(--foreground);
 }
 
 .tab.active::after {
@@ -1704,29 +2520,111 @@ body {
   transform: translateX(-50%);
   width: 60px;
   height: 4px;
-  background: var(--twitter-blue);
-  border-radius: 2px;
+  background: var(--primary);
+  border-radius: var(--radius-sm);
 }
 
-/* Compose box */
+[data-theme='lyra'] .tab.active::after {
+  border-radius: 0;
+  height: 2px;
+}
+
+/* ============================================
+   SEARCH BOX
+   ============================================ */
+.search-box {
+  position: sticky;
+  top: 0;
+  background: var(--background);
+  padding: 4px 0 16px;
+  z-index: 5;
+}
+
+[data-theme='nova'] .search-box,
+[data-theme='mira'] .search-box {
+  padding: 4px 0 8px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 16px 12px 48px;
+  border-radius: var(--radius-lg);
+  border: 1px solid transparent;
+  background: var(--muted);
+  font-size: 15px;
+  color: var(--foreground);
+  transition: var(--transition);
+  font-family: var(--font-sans);
+}
+
+[data-theme='nova'] .search-input,
+[data-theme='mira'] .search-input {
+  padding: 8px 12px 8px 36px;
+  font-size: 14px;
+}
+
+[data-theme='lyra'] .search-input {
+  border-color: var(--border);
+  border-width: 2px;
+  background: var(--background);
+}
+
+.search-input:focus {
+  outline: 2px solid var(--primary);
+  background: var(--background);
+  border-color: var(--primary);
+}
+
+[data-theme='lyra'] .search-input:focus {
+  outline-offset: 0;
+}
+
+/* ============================================
+   COMPOSE BOX
+   ============================================ */
 .compose-box {
-  border-bottom: 1px solid var(--twitter-border);
+  border-bottom: 1px solid var(--border);
   padding: 12px 16px 16px;
+}
+
+[data-theme='nova'] .compose-box,
+[data-theme='mira'] .compose-box {
+  padding: 8px 12px 12px;
+}
+
+[data-theme='maia'] .compose-box {
+  padding: 16px 24px 20px;
+}
+
+[data-theme='lyra'] .compose-box {
+  border-width: 2px;
 }
 
 .compose-box textarea {
   width: 100%;
   border: none;
   font-size: 20px;
-  font-family: inherit;
+  font-family: var(--font-sans);
   resize: none;
   min-height: 120px;
   margin-top: 8px;
-  color: var(--twitter-black);
+  color: var(--foreground);
+  background: transparent;
+}
+
+[data-theme='nova'] .compose-box textarea,
+[data-theme='mira'] .compose-box textarea {
+  font-size: 16px;
+  min-height: 80px;
+}
+
+[data-theme='lyra'] .compose-box textarea {
+  font-family: var(--font-mono);
+  font-size: 14px;
 }
 
 .compose-box textarea::placeholder {
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
 }
 
 .compose-box textarea:focus {
@@ -1738,7 +2636,16 @@ body {
   justify-content: space-between;
   align-items: center;
   padding-top: 12px;
-  border-top: 1px solid var(--twitter-border);
+  border-top: 1px solid var(--border);
+}
+
+[data-theme='nova'] .compose-footer,
+[data-theme='mira'] .compose-footer {
+  padding-top: 8px;
+}
+
+[data-theme='lyra'] .compose-footer {
+  border-width: 2px;
 }
 
 .compose-actions {
@@ -1752,32 +2659,62 @@ body {
   border-radius: 50%;
   border: none;
   background: transparent;
-  color: var(--twitter-blue);
+  color: var(--primary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
+  transition: var(--transition);
+}
+
+[data-theme='nova'] .icon-button,
+[data-theme='mira'] .icon-button {
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+}
+
+[data-theme='lyra'] .icon-button {
+  border-radius: var(--radius);
 }
 
 .icon-button:hover {
-  background: rgba(29, 155, 240, 0.1);
+  background: var(--accent);
+}
+
+[data-theme='lyra'] .icon-button:hover {
+  border: 2px solid var(--border);
+  background: transparent;
 }
 
 .tweet-button {
-  background: var(--twitter-blue);
-  color: white;
+  background: var(--primary);
+  color: var(--primary-foreground);
   border: none;
-  border-radius: 9999px;
+  border-radius: var(--radius-lg);
   padding: 8px 16px;
   font-size: 15px;
   font-weight: 700;
   min-width: 80px;
   cursor: pointer;
+  transition: var(--transition);
+}
+
+[data-theme='nova'] .tweet-button,
+[data-theme='mira'] .tweet-button {
+  padding: 6px 12px;
+  font-size: 14px;
+  min-width: 70px;
+}
+
+[data-theme='lyra'] .tweet-button {
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
 }
 
 .tweet-button:hover:not(:disabled) {
-  background: var(--twitter-blue-hover);
+  opacity: 0.9;
 }
 
 .tweet-button:disabled {
@@ -1785,16 +2722,31 @@ body {
   cursor: not-allowed;
 }
 
-/* Post card */
+/* ============================================
+   POST CARDS
+   ============================================ */
 .post-card {
-  border-bottom: 1px solid var(--twitter-border);
+  border-bottom: 1px solid var(--border);
   padding: 12px 16px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: var(--transition);
+}
+
+[data-theme='nova'] .post-card,
+[data-theme='mira'] .post-card {
+  padding: 8px 12px;
+}
+
+[data-theme='maia'] .post-card {
+  padding: 16px 20px;
+}
+
+[data-theme='lyra'] .post-card {
+  border-width: 2px;
 }
 
 .post-card:hover {
-  background: var(--twitter-hover-bg);
+  background: var(--hover);
 }
 
 .post-header {
@@ -1802,12 +2754,35 @@ body {
   gap: 12px;
 }
 
+[data-theme='nova'] .post-header,
+[data-theme='mira'] .post-header {
+  gap: 8px;
+}
+
+[data-theme='maia'] .post-header {
+  gap: 16px;
+}
+
+/* ============================================
+   AVATARS
+   ============================================ */
 .avatar {
   width: 48px;
   height: 48px;
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
+  background: var(--muted);
+}
+
+[data-theme='nova'] .avatar,
+[data-theme='mira'] .avatar {
+  width: 40px;
+  height: 40px;
+}
+
+[data-theme='lyra'] .avatar {
+  border-radius: var(--radius);
 }
 
 .avatar-sm {
@@ -1816,13 +2791,29 @@ body {
 }
 
 .avatar-lg {
-  width: 128px;
-  height: 128px;
-  border: 4px solid white;
+  width: 134px;
+  height: 134px;
+  border: 4px solid var(--background);
   margin-top: -15%;
   position: relative;
 }
 
+[data-theme='nova'] .avatar-lg,
+[data-theme='mira'] .avatar-lg {
+  width: 96px;
+  height: 96px;
+  border-width: 3px;
+}
+
+[data-theme='maia'] .avatar-lg {
+  width: 148px;
+  height: 148px;
+  border-width: 6px;
+}
+
+/* ============================================
+   POST CONTENT
+   ============================================ */
 .post-body {
   flex: 1;
   min-width: 0;
@@ -1833,12 +2824,19 @@ body {
   align-items: baseline;
   gap: 4px;
   margin-bottom: 2px;
+  flex-wrap: wrap;
 }
 
 .post-author {
   font-weight: 700;
-  color: var(--twitter-black);
+  color: var(--foreground);
   font-size: 15px;
+  text-decoration: none;
+}
+
+[data-theme='nova'] .post-author,
+[data-theme='mira'] .post-author {
+  font-size: 14px;
 }
 
 .post-author:hover {
@@ -1846,8 +2844,14 @@ body {
 }
 
 .post-handle {
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   font-size: 15px;
+  text-decoration: none;
+}
+
+[data-theme='nova'] .post-handle,
+[data-theme='mira'] .post-handle {
+  font-size: 14px;
 }
 
 .post-handle:hover {
@@ -1855,8 +2859,13 @@ body {
 }
 
 .post-timestamp {
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   font-size: 15px;
+}
+
+[data-theme='nova'] .post-timestamp,
+[data-theme='mira'] .post-timestamp {
+  font-size: 14px;
 }
 
 .post-timestamp::before {
@@ -1867,12 +2876,26 @@ body {
 .post-content {
   font-size: 15px;
   line-height: 20px;
-  color: var(--twitter-black);
+  color: var(--foreground);
   margin-top: 2px;
   word-wrap: break-word;
   white-space: pre-wrap;
 }
 
+[data-theme='nova'] .post-content,
+[data-theme='mira'] .post-content {
+  font-size: 14px;
+  line-height: 18px;
+}
+
+[data-theme='lyra'] .post-content {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* ============================================
+   POST ACTIONS
+   ============================================ */
 .post-actions {
   display: flex;
   justify-content: space-between;
@@ -1880,32 +2903,68 @@ body {
   margin-top: 12px;
 }
 
+[data-theme='nova'] .post-actions,
+[data-theme='mira'] .post-actions {
+  margin-top: 8px;
+  max-width: 350px;
+}
+
 .post-action {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   font-size: 13px;
   padding: 8px;
-  border-radius: 9999px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: var(--transition);
+}
+
+[data-theme='nova'] .post-action,
+[data-theme='mira'] .post-action {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+[data-theme='lyra'] .post-action {
+  border-radius: var(--radius);
+}
+
+.post-action svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+}
+
+[data-theme='nova'] .post-action svg,
+[data-theme='mira'] .post-action svg {
+  width: 16px;
+  height: 16px;
 }
 
 .post-action:hover {
-  background: rgba(29, 155, 240, 0.1);
-  color: var(--twitter-blue);
+  background: var(--accent);
+  color: var(--primary);
 }
 
 .post-action.liked {
   color: #F91880;
 }
 
+.post-action.liked svg {
+  fill: #F91880;
+}
+
 .post-action.liked:hover {
   background: rgba(249, 24, 128, 0.1);
 }
 
-/* Profile */
+/* ============================================
+   PROFILE
+   ============================================ */
 .profile-header {
   position: relative;
 }
@@ -1913,12 +2972,30 @@ body {
 .profile-banner {
   width: 100%;
   height: 200px;
-  background: var(--twitter-light-gray);
+  background: var(--muted);
   object-fit: cover;
+}
+
+[data-theme='nova'] .profile-banner,
+[data-theme='mira'] .profile-banner {
+  height: 150px;
+}
+
+[data-theme='maia'] .profile-banner {
+  height: 240px;
 }
 
 .profile-info {
   padding: 12px 16px;
+}
+
+[data-theme='nova'] .profile-info,
+[data-theme='mira'] .profile-info {
+  padding: 8px 12px;
+}
+
+[data-theme='maia'] .profile-info {
+  padding: 16px 24px;
 }
 
 .profile-actions-row {
@@ -1931,13 +3008,25 @@ body {
   font-size: 20px;
   font-weight: 800;
   line-height: 24px;
-  color: var(--twitter-black);
+  color: var(--foreground);
+}
+
+[data-theme='nova'] .profile-name,
+[data-theme='mira'] .profile-name {
+  font-size: 18px;
+  line-height: 22px;
 }
 
 .profile-handle {
   font-size: 15px;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   margin-bottom: 12px;
+}
+
+[data-theme='nova'] .profile-handle,
+[data-theme='mira'] .profile-handle {
+  font-size: 14px;
+  margin-bottom: 8px;
 }
 
 .profile-bio {
@@ -1946,12 +3035,31 @@ body {
   margin-bottom: 12px;
 }
 
+[data-theme='nova'] .profile-bio,
+[data-theme='mira'] .profile-bio {
+  font-size: 14px;
+  line-height: 18px;
+  margin-bottom: 8px;
+}
+
+[data-theme='lyra'] .profile-bio {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
 .profile-meta {
   display: flex;
   gap: 12px;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   font-size: 15px;
   margin-bottom: 12px;
+}
+
+[data-theme='nova'] .profile-meta,
+[data-theme='mira'] .profile-meta {
+  font-size: 14px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .profile-stats {
@@ -1960,174 +3068,421 @@ body {
   font-size: 15px;
 }
 
+[data-theme='nova'] .profile-stats,
+[data-theme='mira'] .profile-stats {
+  gap: 12px;
+  font-size: 14px;
+}
+
 .profile-stat {
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
+  cursor: pointer;
 }
 
 .profile-stat strong {
-  color: var(--twitter-black);
+  color: var(--foreground);
   font-weight: 700;
 }
 
 .profile-stat:hover {
   text-decoration: underline;
-  cursor: pointer;
 }
 
-/* Buttons */
+/* ============================================
+   BUTTONS
+   ============================================ */
 .btn-primary {
-  background: var(--twitter-black);
-  color: white;
+  background: var(--foreground);
+  color: var(--background);
   border: none;
-  border-radius: 9999px;
+  border-radius: var(--radius-lg);
   padding: 8px 16px;
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   min-width: 100px;
+  transition: var(--transition);
+}
+
+[data-theme='twitter'] .btn-primary {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+[data-theme='vega'] .btn-primary,
+[data-theme='nova'] .btn-primary,
+[data-theme='maia'] .btn-primary,
+[data-theme='lyra'] .btn-primary,
+[data-theme='mira'] .btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+[data-theme='nova'] .btn-primary,
+[data-theme='mira'] .btn-primary {
+  padding: 6px 12px;
+  font-size: 14px;
+  min-width: 80px;
+}
+
+[data-theme='lyra'] .btn-primary {
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
 }
 
 .btn-primary:hover {
-  background: #272C30;
+  opacity: 0.9;
 }
 
 .btn-secondary {
   background: transparent;
-  color: var(--twitter-black);
-  border: 1px solid var(--twitter-border);
-  border-radius: 9999px;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 8px 16px;
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   min-width: 100px;
+  transition: var(--transition);
+}
+
+[data-theme='nova'] .btn-secondary,
+[data-theme='mira'] .btn-secondary {
+  padding: 6px 12px;
+  font-size: 14px;
+  min-width: 80px;
+}
+
+[data-theme='lyra'] .btn-secondary {
+  border-width: 2px;
+  border-radius: var(--radius);
 }
 
 .btn-secondary:hover {
-  background: var(--twitter-hover-bg);
+  background: var(--hover);
 }
 
-/* Widget boxes (right sidebar) */
+/* ============================================
+   WIDGETS (Right Sidebar)
+   ============================================ */
 .widget-box {
-  background: var(--twitter-light-gray);
-  border-radius: 16px;
+  background: var(--muted);
+  border-radius: var(--radius);
   margin-bottom: 16px;
   overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+[data-theme='nova'] .widget-box,
+[data-theme='mira'] .widget-box {
+  margin-bottom: 12px;
+}
+
+[data-theme='maia'] .widget-box {
+  margin-bottom: 20px;
+}
+
+[data-theme='lyra'] .widget-box {
+  border-width: 2px;
 }
 
 .widget-header {
   padding: 12px 16px;
   font-size: 20px;
   font-weight: 800;
-  color: var(--twitter-black);
+  color: var(--foreground);
+  border-bottom: 1px solid var(--border);
+}
+
+[data-theme='nova'] .widget-header,
+[data-theme='mira'] .widget-header {
+  padding: 8px 12px;
+  font-size: 16px;
+}
+
+[data-theme='lyra'] .widget-header {
+  border-width: 2px;
 }
 
 .widget-item {
   padding: 12px 16px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: var(--transition);
+  border-bottom: 1px solid var(--border);
+}
+
+[data-theme='nova'] .widget-item,
+[data-theme='mira'] .widget-item {
+  padding: 8px 12px;
+}
+
+.widget-item:last-child {
+  border-bottom: none;
 }
 
 .widget-item:hover {
-  background: var(--twitter-hover-bg);
+  background: var(--hover);
 }
 
 .widget-item-title {
   font-size: 15px;
   font-weight: 700;
-  color: var(--twitter-black);
+  color: var(--foreground);
   margin-bottom: 2px;
+}
+
+[data-theme='nova'] .widget-item-title,
+[data-theme='mira'] .widget-item-title {
+  font-size: 14px;
 }
 
 .widget-item-meta {
   font-size: 13px;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
 }
 
-/* Auth pages */
+[data-theme='nova'] .widget-item-meta,
+[data-theme='mira'] .widget-item-meta {
+  font-size: 12px;
+}
+
+/* ============================================
+   AUTH PAGES
+   ============================================ */
 .auth-container {
   max-width: 600px;
   margin: 48px auto;
   padding: 48px;
-  background: white;
-  border-radius: 16px;
+  background: var(--background);
+  border-radius: var(--radius);
   box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+  border: 1px solid var(--border);
+}
+
+[data-theme='twitter'] .auth-container {
+  background: #000000;
+  border-color: var(--border);
+}
+
+[data-theme='nova'] .auth-container,
+[data-theme='mira'] .auth-container {
+  padding: 32px;
+  margin: 32px auto;
+}
+
+[data-theme='lyra'] .auth-container {
+  box-shadow: none;
+  border-width: 2px;
 }
 
 .form-group {
   margin-bottom: 20px;
 }
 
+[data-theme='nova'] .form-group,
+[data-theme='mira'] .form-group {
+  margin-bottom: 16px;
+}
+
 .form-group label {
   display: block;
   font-size: 13px;
   font-weight: 500;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   margin-bottom: 8px;
 }
 
-.form-group input {
+.form-group input,
+.form-group textarea,
+.form-group select {
   width: 100%;
   padding: 12px 16px;
-  border: 1px solid var(--twitter-border);
-  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   font-size: 17px;
-  color: var(--twitter-black);
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  transition: var(--transition);
 }
 
-.form-group input:focus {
-  outline: none;
-  border-color: var(--twitter-blue);
+[data-theme='nova'] .form-group input,
+[data-theme='nova'] .form-group textarea,
+[data-theme='mira'] .form-group input,
+[data-theme='mira'] .form-group textarea {
+  padding: 8px 12px;
+  font-size: 15px;
 }
 
+[data-theme='lyra'] .form-group input,
+[data-theme='lyra'] .form-group textarea {
+  border-width: 2px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: 2px solid var(--primary);
+  border-color: var(--primary);
+}
+
+[data-theme='lyra'] .form-group input:focus,
+[data-theme='lyra'] .form-group textarea:focus {
+  outline-offset: 0;
+}
+
+/* ============================================
+   MESSAGES
+   ============================================ */
 .error {
-  color: var(--twitter-red);
+  color: var(--destructive);
   font-size: 13px;
   margin-top: 8px;
 }
 
 .success {
-  color: #00BA7C;
+  color: var(--success);
   font-size: 13px;
   margin-top: 8px;
 }
 
-.text-center {
+.empty-state {
+  padding: 32px;
   text-align: center;
+  color: var(--muted-foreground);
 }
 
+[data-theme='nova'] .empty-state,
+[data-theme='mira'] .empty-state {
+  padding: 24px;
+}
+
+/* ============================================
+   THEME SWITCHER
+   ============================================ */
+.theme-switcher {
+  margin: 20px 0;
+}
+
+.theme-switcher-label {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--foreground);
+}
+
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+[data-theme='mira'] .theme-options {
+  gap: 8px;
+}
+
+.theme-option {
+  padding: 16px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: center;
+  transition: var(--transition);
+  background: var(--background);
+}
+
+[data-theme='nova'] .theme-option,
+[data-theme='mira'] .theme-option {
+  padding: 12px;
+}
+
+.theme-option:hover {
+  border-color: var(--primary);
+  background: var(--hover);
+}
+
+.theme-option.active {
+  border-color: var(--primary);
+  background: var(--accent);
+}
+
+.theme-option-name {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.theme-option-desc {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ============================================
+   SETTINGS PAGE
+   ============================================ */
+.settings-section {
+  border-bottom: 1px solid var(--border);
+  padding: 20px 0;
+}
+
+[data-theme='lyra'] .settings-section {
+  border-width: 2px;
+}
+
+.settings-section h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: var(--foreground);
+}
+
+[data-theme='nova'] .settings-section h3,
+[data-theme='mira'] .settings-section h3 {
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+
+/* ============================================
+   UTILITIES
+   ============================================ */
+.text-center { text-align: center; }
+.mt-1 { margin-top: 8px; }
+.mb-1 { margin-bottom: 8px; }
+.text-muted { color: var(--muted-foreground); }
+
 .link {
-  color: var(--twitter-blue);
+  color: var(--primary);
   text-decoration: none;
+  transition: var(--transition);
 }
 
 .link:hover {
   text-decoration: underline;
 }
 
-/* Empty state */
-.empty-state {
-  padding: 32px;
-  text-align: center;
-  color: var(--twitter-dark-gray);
-}
-
-/* Utilities */
-.mt-1 { margin-top: 8px; }
-.mb-1 { margin-bottom: 8px; }
-.text-muted { color: var(--twitter-dark-gray); }
-
 small {
   font-size: 13px;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
   display: block;
   margin-top: 4px;
 }
 
-/* Char counter */
+[data-theme='nova'] small,
+[data-theme='mira'] small {
+  font-size: 12px;
+}
+
 .char-counter {
   font-size: 13px;
-  color: var(--twitter-dark-gray);
+  color: var(--muted-foreground);
+}
+
+[data-theme='nova'] .char-counter,
+[data-theme='mira'] .char-counter {
+  font-size: 12px;
 }
 
 .char-counter.warning {
@@ -2135,14 +3490,113 @@ small {
 }
 
 .char-counter.error {
-  color: var(--twitter-red);
+  color: var(--destructive);
+}
+
+/* ============================================
+   CONTAINER FOR NON-TWITTER LAYOUTS
+   ============================================ */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+[data-theme='nova'] .container,
+[data-theme='mira'] .container {
+  padding: 1rem;
+}
+
+.nav-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+[data-theme='lyra'] .nav-bar {
+  border-width: 2px;
+}
+
+.nav-links {
+  display: flex;
+  gap: 1rem;
+}
+
+.nav-links button {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  width: auto;
+  padding: 8px 16px;
+}
+
+[data-theme='nova'] .nav-links button,
+[data-theme='mira'] .nav-links button {
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+@media (max-width: 1024px) {
+  .sidebar-right {
+    display: none;
+  }
+  
+  .twitter-layout {
+    max-width: 920px;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar-left {
+    width: 88px;
+  }
+  
+  .nav-item span:not(.nav-icon) {
+    display: none;
+  }
+  
+  .nav-item svg {
+    margin-right: 0;
+  }
+  
+  .post-button {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    padding: 0;
+    font-size: 0;
+  }
+  
+  .post-button::before {
+    content: '+';
+    font-size: 24px;
+  }
+}
+
+/* ============================================
+   SMOOTH TRANSITIONS
+   ============================================ */
+* {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.3s;
+  transition-timing-function: ease;
+}
+
+button, a, .nav-item, .post-card, .tab, .icon-button {
+  transition-property: all;
+  transition-duration: 0.2s;
 }`;
+
   return new Response(css, {
     headers: { 'Content-Type': 'text/css' },
   });
 });
 
-// Serve API client JavaScript
 app.get('/js/api.js', (_c) => {
   const js = `const API_BASE = '/api';
 
@@ -2403,7 +3857,44 @@ const notifications = {
   },
 };
 
-// WebSocket manager for real-time updates
+const theme = {
+  current: 'twitter',
+  
+  init() {
+    const saved = localStorage.getItem('the_wire_theme');
+    if (saved) {
+      this.apply(saved);
+    } else {
+      this.apply('twitter');
+    }
+  },
+  
+  apply(themeName) {
+    document.documentElement.setAttribute('data-theme', themeName);
+    this.current = themeName;
+    localStorage.setItem('the_wire_theme', themeName);
+  },
+  
+  get() {
+    return this.current;
+  },
+  
+  getAll() {
+    return [
+      { name: 'twitter', display: 'Twitter', desc: 'Pure black, blue accent' },
+      { name: 'vega', display: 'Vega', desc: 'Classic shadcn slate' },
+      { name: 'nova', display: 'Nova', desc: 'Compact & efficient' },
+      { name: 'maia', display: 'Maia', desc: 'Soft & rounded' },
+      { name: 'lyra', display: 'Lyra', desc: 'Boxy & monospace' },
+      { name: 'mira', display: 'Mira', desc: 'Ultra dense' }
+    ];
+  }
+};
+
+if (typeof window !== 'undefined') {
+  theme.init();
+}
+
 const ws = {
   socket: null,
   listeners: {},
@@ -2427,19 +3918,17 @@ const ws = {
       console.log('WebSocket connected');
       this.reconnectAttempts = 0;
       
-      // Start heartbeat
       this.heartbeatInterval = setInterval(() => {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
           this.socket.send(JSON.stringify({ type: 'ping' }));
         }
-      }, 30000); // Ping every 30 seconds
+      }, 30000);
     };
     
     this.socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         
-        // Emit event to listeners
         if (this.listeners[data.type]) {
           this.listeners[data.type].forEach(callback => callback(data));
         }
@@ -2454,7 +3943,6 @@ const ws = {
         clearInterval(this.heartbeatInterval);
       }
       
-      // Auto-reconnect with exponential backoff
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
         this.reconnectAttempts++;

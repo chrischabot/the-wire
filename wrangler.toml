@@ -5,7 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 # Development settings
 [dev]
-port = 8787
+port = 8080
+host = "0.0.0.0"
 local_protocol = "http"
 
 # KV Namespaces
