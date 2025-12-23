@@ -116,41 +116,117 @@ const users = {
 };
 
 /**
- * Theme management
+ * Theme management (Maia only)
  */
 const theme = {
-  current: 'twitter',
-  
-  init() {
-    const saved = localStorage.getItem('the_wire_theme');
-    if (saved) {
-      this.apply(saved);
-    } else {
-      this.apply('twitter');
-    }
-  },
-  
-  apply(themeName) {
-    document.documentElement.setAttribute('data-theme', themeName);
-    this.current = themeName;
-    localStorage.setItem('the_wire_theme', themeName);
-  },
-  
-  get() {
-    return this.current;
-  },
-  
-  getAll() {
-    return [
-      { name: 'twitter', display: 'Twitter', desc: 'Pure black, Twitter blue' },
-      { name: 'vega', display: 'Vega', desc: 'Classic shadcn slate' },
-      { name: 'nova', display: 'Nova', desc: 'Compact & efficient' },
-      { name: 'maia', display: 'Maia', desc: 'Soft & rounded' },
-      { name: 'lyra', display: 'Lyra', desc: 'Boxy & monospace' },
-      { name: 'mira', display: 'Mira', desc: 'Ultra dense' }
-    ];
-  }
+  current: 'maia',
+  init() {},
+  apply() {},
+  get() { return 'maia'; },
+  getAll() { return [{ name: 'maia', display: 'Maia', desc: 'Soft & rounded' }]; }
 };
+
+/**
+ * Posts API calls
+ */
+const posts = {
+  async create(content, options = {}) {
+    return await apiRequest('/posts', {
+      method: 'POST',
+      body: JSON.stringify({
+        content,
+        ...options,
+      }),
+    });
+  },
+
+  async get(postId) {
+    return await apiRequest(`/posts/${postId}`);
+  },
+
+  async delete(postId) {
+    return await apiRequest(`/posts/${postId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async like(postId) {
+    return await apiRequest(`/posts/${postId}/like`, {
+      method: 'POST',
+    });
+  },
+
+  async unlike(postId) {
+    return await apiRequest(`/posts/${postId}/like`, {
+      method: 'DELETE',
+    });
+  },
+
+  async repost(postId) {
+    return await apiRequest(`/posts/${postId}/repost`, {
+      method: 'POST',
+    });
+  },
+};
+
+/**
+ * Feed API calls
+ */
+const feed = {
+  async getHome(cursor = null, limit = 20) {
+    let url = `/feed/home?limit=${limit}`;
+    if (cursor) {
+      url += `&cursor=${cursor}`;
+    }
+    return await apiRequest(url);
+  },
+
+  async getUser(handle, cursor = null, limit = 20) {
+    let url = `/feed/user/${handle}?limit=${limit}`;
+    if (cursor) {
+      url += `&cursor=${cursor}`;
+    }
+    return await apiRequest(url);
+  },
+};
+
+/**
+ * Notifications API calls
+ */
+const notifications = {
+  async getAll(cursor = null, limit = 20) {
+    let url = `/notifications?limit=${limit}`;
+    if (cursor) {
+      url += `&cursor=${cursor}`;
+    }
+    return await apiRequest(url);
+  },
+
+  async getUnreadCount() {
+    return await apiRequest('/notifications/unread-count');
+  },
+
+  async markAsRead(notificationId) {
+    return await apiRequest(`/notifications/${notificationId}/read`, {
+      method: 'PUT',
+    });
+  },
+
+  async markAllAsRead() {
+    return await apiRequest('/notifications/read-all', {
+      method: 'PUT',
+    });
+  },
+};
+
+/**
+ * Text utilities
+ */
+function linkifyMentions(text) {
+  if (!text) return '';
+  // Match @handle (alphanumeric and underscores, 1-15 chars like Twitter)
+  return text.replace(/@([a-zA-Z0-9_]{1,15})/g, '<a href="/u/$1" class="mention" onclick="event.stopPropagation()">@$1</a>');
+}
 
 // Initialize theme on page load
 if (typeof window !== 'undefined') {

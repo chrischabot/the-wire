@@ -1,5 +1,6 @@
 # The Wire
 
+<<<<<<< HEAD
 A globally distributed social network built on Cloudflare's edge infrastructure. Share notes in 280 characters with sub-50ms latency worldwide.
 
 ## Features
@@ -275,10 +276,134 @@ The Wire uses a sophisticated feed algorithm:
 2. **FoF Ranking**: Hacker News-style scoring based on engagement and time decay
 3. **Filtering**: Respects blocked users and muted keywords
 4. **Real-Time Updates**: New posts appear instantly via WebSocket
+=======
+A social network that runs entirely at the edge.
+
+![Architecture](docs/architecture.png)
+
+## The Pitch
+
+Every request to The Wire travels no further than the nearest Cloudflare data center. Posts propagate globally in milliseconds. User state lives in Durable Objects that follow users around the world. Media streams from R2 buckets positioned at the edge. The entire application, from authentication to feed ranking, executes within 50ms of your users.
+
+This is what becomes possible when you build a social network on Cloudflare's edge infrastructure rather than in centralized data centers.
+
+## Why This Exists
+
+The Wire serves as a reference implementation for building stateful, globally distributed applications on Cloudflare Workers. It demonstrates that the edge can handle complex social networking features: personalized feeds, real-time notifications, media uploads, follower graphs, and content moderation. The patterns here apply to any application where latency matters and users are scattered across the globe.
+
+## What It Does
+
+The Wire replicates the core Twitter experience:
+
+**Identity and Social Graph**
+- Email and password authentication with JWT tokens validated at the edge
+- User profiles with avatars, bios, and follower counts
+- Follow, unfollow, and block relationships stored in per-user Durable Objects
+
+**Content**
+- 280-character posts with support for images and videos
+- Replies, likes, reposts, and quote posts
+- Snowflake IDs for chronologically sortable, globally unique identifiers
+
+**Feed**
+- Personalized home timeline built from posts by accounts you follow
+- Friends-of-friends discovery using a Hacker News-style ranking algorithm
+- Round-robin merge: two posts from your follows, one from the wider network
+- Cursor-based pagination with blocked user and muted word filtering
+
+**Real-time**
+- WebSocket connections for live notification delivery
+- Instant updates when someone likes, reposts, or mentions you
+
+**Moderation**
+- Admin roles with the ability to ban users and take down posts
+- Per-user block lists and muted word filters
+
+## Architecture
+
+The Wire distributes state and compute across Cloudflare's primitives:
+
+| Component | Role |
+|-----------|------|
+| **Workers** | HTTP routing via Hono, middleware chain, business logic |
+| **Durable Objects** | UserDO for profiles and social graph, PostDO for interaction counts, FeedDO for personalized timelines, WebSocketDO for real-time connections |
+| **KV** | Authentication cache, post metadata, session storage, feed rankings |
+| **R2** | Image and video storage with magic byte validation |
+| **Queues** | Fanout queue for distributing posts to follower feeds |
+| **Cron Triggers** | Scheduled jobs for ranking updates (15 min), feed cleanup (hourly), and KV compaction (daily) |
+
+The Durable Object model is central to how The Wire achieves consistency at scale. Each user has their own UserDO instance that acts as the single source of truth for their profile, settings, and social connections. When you follow someone, both your UserDO and their UserDO update transactionally. When you post, the message fans out through a queue to the FeedDO instances of each follower. This architecture means that read operations almost always hit local state while writes coordinate only where necessary.
+
+## Running Locally
+
+Prerequisites: Node.js 18+, a Cloudflare account
+
+```bash
+# Install dependencies
+npm install
+
+# Set up local environment
+cp .dev.vars.example .dev.vars
+# Edit .dev.vars and add: JWT_SECRET=your-secret-here
+
+# Start development server
+npm run dev
+```
+
+The application runs at `http://localhost:8080`. Create an account and start posting.
+
+## Deploying to Production
+
+```bash
+# Create KV namespaces
+wrangler kv:namespace create USERS_KV
+wrangler kv:namespace create POSTS_KV
+wrangler kv:namespace create SESSIONS_KV
+wrangler kv:namespace create FEEDS_KV
+
+# Create R2 bucket
+wrangler r2 bucket create the-wire-media
+
+# Create queue
+wrangler queues create fanout-queue
+
+# Set secrets
+wrangler secret put JWT_SECRET
+
+# Deploy
+npm run deploy
+```
+
+Update `wrangler.toml` with the namespace and bucket IDs from the creation commands.
+
+## Configuration
+
+Environment variables in `wrangler.toml`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_EXPIRY_HOURS` | 24 | Token lifetime |
+| `MAX_NOTE_LENGTH` | 280 | Character limit for posts |
+| `FEED_PAGE_SIZE` | 20 | Posts per page |
+| `INITIAL_ADMIN_HANDLE` | - | Handle to grant admin privileges on first login |
+
+## Security Model
+
+The Wire implements layered defenses appropriate for a production social network:
+
+- **Rate limiting**: KV-based distributed rate limiter with per-endpoint limits (5 login attempts per minute, 30 posts per hour, 20 media uploads per hour)
+- **CSRF protection**: Origin header validation on state-changing requests
+- **Account lockout**: Progressive delays after failed login attempts
+- **File validation**: Magic byte verification on media uploads, not just MIME type checking
+- **Input sanitization**: XSS prevention and URL scheme validation
+
+JWT tokens are stateless, which means compromised tokens remain valid until expiration. This tradeoff favors edge performance over immediate revocation capability. For applications requiring instant token invalidation, add a blocklist in KV.
+>>>>>>> 6578d01 (Tweaks, and bugfixes)
 
 ## Testing
 
 ```bash
+<<<<<<< HEAD
 # Run all tests
 npm test
 
@@ -346,3 +471,62 @@ MIT License - see LICENSE file for details
 - Built with [Hono](https://hono.dev/)
 - Icons from [Lucide](https://lucide.dev/)
 - Theming inspired by [shadcn/ui](https://ui.shadcn.com/)
+=======
+# Unit tests
+npm test
+
+# Integration tests
+npm run test:integration
+
+# Type checking
+npm run typecheck
+```
+
+The test suite uses Vitest with Cloudflare's worker pool for realistic edge execution.
+
+## Project Structure
+
+```
+src/
+├── index.ts              # Worker entry, routes, middleware
+├── durable-objects/      # UserDO, PostDO, FeedDO, WebSocketDO
+├── handlers/             # Route handlers by domain
+├── middleware/           # Rate limiting, CSRF
+├── services/             # Notifications, snowflake IDs
+├── types/                # TypeScript interfaces
+└── utils/                # Validation, JWT, crypto
+public/
+├── home.html             # Main application shell
+├── css/                  # Styles with theme variants
+└── js/                   # Client-side logic
+```
+
+## Constraints and Tradeoffs
+
+**N+1 queries**: Fetching a feed currently requires one KV read per post. At scale, this should migrate to secondary indices or denormalized feed entries. The current approach works well for thousands of users but will need optimization for millions.
+
+**Eventually consistent**: KV propagates globally within seconds, not milliseconds. Users in different regions may briefly see stale data after writes. This is acceptable for social content but inappropriate for financial transactions.
+
+**No email delivery**: Password reset tokens work, but The Wire does not send emails. Integrate with a transactional email service for production use.
+
+**Single-region Durable Objects**: Each Durable Object instance lives in one location. Users far from their DO's region experience slightly higher latency on write operations. Cloudflare's smart placement helps, but this remains a consideration for globally distributed teams.
+
+## What This Proves
+
+Social networking at the edge is not a theoretical exercise. The Wire demonstrates that:
+
+1. Complex stateful applications can run entirely on edge infrastructure
+2. Durable Objects provide the consistency guarantees that social features require
+3. Sub-50ms response times are achievable globally without regional deployments
+4. The operational model simplifies dramatically when there are no servers to manage
+
+The techniques here apply beyond social networks. Any application that benefits from low latency and global distribution can adopt these patterns: collaborative editing, real-time gaming, IoT command and control, or financial trading systems with global reach.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+Built by [Chris Chabot](https://github.com/chrischabot)
+>>>>>>> 6578d01 (Tweaks, and bugfixes)

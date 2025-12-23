@@ -77,22 +77,47 @@ feed.get('/home', requireAuth, async (c) => {
 
     // Get FoF ranked posts
     const fofPosts = await getFoFRankedPosts(c.env, userId, followingIds, Math.ceil(limit / 3) + 5);
-    
+
     // Filter FoF posts for muted words
     const filteredFofPosts = await filterPostsForMutedWords(c.env, fofPosts, mutedWords);
 
     // Fetch full post metadata for followed user entries
     const followedPosts: FeedPost[] = [];
+    const seenPostIds = new Set<string>();
+
     for (const entry of feedData.entries) {
       const postData = await c.env.POSTS_KV.get(`post:${entry.postId}`);
       if (postData) {
         const post: PostMetadata = JSON.parse(postData);
-        followedPosts.push({
-          ...post,
-          source: entry.source === 'own' ? 'own' : 'follow',
-        });
+        if (!post.isDeleted) {
+          followedPosts.push({
+            ...post,
+            source: entry.source === 'own' ? 'own' : 'follow',
+          });
+          seenPostIds.add(post.id);
+        }
       }
     }
+
+    // Always include user's own recent posts (in case FeedDO wasn't populated)
+    // This ensures users always see their own posts in their feed
+    const userPostsList = await c.env.POSTS_KV.list({ prefix: 'post:', limit: BATCH_SIZE.KV_LIST });
+    for (const key of userPostsList.keys) {
+      const postData = await c.env.POSTS_KV.get(key.name);
+      if (postData) {
+        const post: PostMetadata = JSON.parse(postData);
+        if (post.authorId === userId && !post.isDeleted && !seenPostIds.has(post.id)) {
+          followedPosts.push({
+            ...post,
+            source: 'own',
+          });
+          seenPostIds.add(post.id);
+        }
+      }
+    }
+
+    // Sort by creation time descending
+    followedPosts.sort((a, b) => b.createdAt - a.createdAt);
 
     // Fetch full post metadata for FoF posts
     const fofPostsWithMeta: FeedPost[] = [];
@@ -170,14 +195,20 @@ feed.get('/global', async (c) => {
         const blockedData = await blockedResp.json() as { blocked: string[] };
         blockedUserIds = blockedData.blocked || [];
       }
-    } catch (error) {
+    } catch {
       // Invalid token, proceed as unauthenticated
-      console.log('Invalid token in global feed, proceeding unauthenticated');
     }
   }
 
   try {
-    let postCursor: string | undefined = cursor ? atob(cursor) : undefined;
+    let postCursor: string | undefined;
+    if (cursor) {
+      try {
+        postCursor = atob(cursor);
+      } catch {
+        postCursor = undefined;
+      }
+    }
     const posts: PostMetadata[] = [];
     
     // Paginate through posts

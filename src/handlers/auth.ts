@@ -87,6 +87,8 @@ auth.post('/signup', rateLimit(RATE_LIMITS.signup), async (c) => {
   await c.env.USERS_KV.put(`handle:${handle}`, userId);
 
   // Initialize UserDO
+  // Users follow themselves by default (followingCount: 1, followerCount: 1)
+  // This ensures they always see their own posts in the social stream
   const defaultProfile: import('../types/user').UserProfile = {
     id: userId,
     handle,
@@ -97,8 +99,8 @@ auth.post('/signup', rateLimit(RATE_LIMITS.signup), async (c) => {
     avatarUrl: '',
     bannerUrl: '',
     joinedAt: now,
-    followerCount: 0,
-    followingCount: 0,
+    followerCount: 1,
+    followingCount: 1,
     postCount: 0,
     isVerified: false,
     isBanned: false,
@@ -117,6 +119,18 @@ auth.post('/signup', rateLimit(RATE_LIMITS.signup), async (c) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profile: defaultProfile, settings: defaultSettings }),
+  });
+
+  // Make user follow themselves so they see their own posts in the feed
+  await stub.fetch('https://do.internal/follow', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  await stub.fetch('https://do.internal/add-follower', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
   });
 
   // Generate token

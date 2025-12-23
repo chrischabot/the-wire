@@ -31,7 +31,6 @@ export class WebSocketDO implements DurableObject {
       
       for (const [id, conn] of this.connections) {
         if (now - conn.lastPing > staleTimeout) {
-          console.log(`Closing stale connection: ${id}`);
           try {
             conn.webSocket.close(1000, 'Connection timeout');
           } catch {

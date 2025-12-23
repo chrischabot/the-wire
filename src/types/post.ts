@@ -37,6 +37,8 @@ export interface PostMetadata {
   authorAvatarUrl: string;
   content: string;
   mediaUrls: string[];
+  replyToId?: string;
+  quoteOfId?: string;
   createdAt: number;
   likeCount: number;
   replyCount: number;

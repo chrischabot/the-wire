@@ -4,7 +4,10 @@
  */
 
 import { createMiddleware } from 'hono/factory';
+import type { Context } from 'hono';
 import type { Env } from '../types/env';
+
+type HonoContext = Context<{ Bindings: Env }>;
 
 interface RateLimitConfig {
   /** Maximum requests allowed in the window */
@@ -43,7 +46,7 @@ export const RATE_LIMITS = {
 /**
  * Extract client IP from request headers
  */
-function getClientIP(c: any): string {
+function getClientIP(c: HonoContext): string {
   // Cloudflare provides the real client IP in CF-Connecting-IP
   const cfIP = c.req.header('CF-Connecting-IP');
   if (cfIP) return cfIP;
@@ -132,7 +135,7 @@ export function rateLimit(config: RateLimitConfig) {
       // Store updated state
       const ttl = Math.ceil((state.resetAt - now) / 1000);
       await c.env.SESSIONS_KV.put(key, JSON.stringify(state), {
-        expirationTtl: Math.max(ttl, 1),
+        expirationTtl: Math.max(ttl, 60),
       });
 
       // Add rate limit headers to response
@@ -163,8 +166,8 @@ export const rateLimitByIP = (config: RateLimitConfig) => {
 export function accountLockout(maxAttempts: number = 5, lockoutMinutes: number = 15) {
   return createMiddleware<{ Bindings: Env }>(async (c, next): Promise<Response | void> => {
     const ip = getClientIP(c);
-    const body = await c.req.json().catch(() => ({}));
-    const email = (body as any).email?.toLowerCase() || 'unknown';
+    const body = await c.req.json<{ email?: string }>().catch(() => ({ email: undefined }));
+    const email = body.email?.toLowerCase() || 'unknown';
     
     // Clone request body for handler
     c.req.raw = new Request(c.req.raw, {

@@ -96,28 +96,41 @@ export async function createMentionNotifications(
   postId: string
 ): Promise<void> {
   const mentions = detectMentions(content);
-  
+
   for (const handle of mentions) {
-    // Get user ID by handle
-    const userId = await env.USERS_KV.get(`handle:${handle}`);
-    if (!userId || userId === actorId) continue; // Skip if user doesn't exist or mentioning self
-    
-    // Check if actor is blocked by mentioned user
-    const userDoId = env.USER_DO.idFromName(userId);
-    const userStub = env.USER_DO.get(userDoId);
-    const blockedResp = await userStub.fetch(`https://do.internal/is-blocked?userId=${actorId}`);
-    const blockedData = await blockedResp.json() as { isBlocked: boolean };
-    
-    if (blockedData.isBlocked) continue; // Skip if blocked
-    
-    // Create mention notification
-    await createNotification(env, {
-      userId,
-      type: 'mention',
-      actorId,
-      postId,
-      content: content.slice(0, 100), // Preview
-    });
+    try {
+      // Get user ID by handle
+      const userId = await env.USERS_KV.get(`handle:${handle}`);
+
+      if (!userId) {
+        continue;
+      }
+
+      if (userId === actorId) {
+        continue;
+      }
+
+      // Check if actor is blocked by mentioned user
+      const userDoId = env.USER_DO.idFromName(userId);
+      const userStub = env.USER_DO.get(userDoId);
+      const blockedResp = await userStub.fetch(`https://do.internal/is-blocked?userId=${actorId}`);
+      const blockedData = await blockedResp.json() as { isBlocked: boolean };
+
+      if (blockedData.isBlocked) {
+        continue;
+      }
+
+      // Create mention notification
+      await createNotification(env, {
+        userId,
+        type: 'mention',
+        actorId,
+        postId,
+        content: content.slice(0, 100), // Preview
+      });
+    } catch (error) {
+      console.error(`[Mentions] Error creating notification for @${handle}:`, error);
+    }
   }
 }
 

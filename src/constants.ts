@@ -76,10 +76,21 @@ export const SCORING = {
 export const BATCH_SIZE = {
   /** KV list batch size */
   KV_LIST: 100,
-  
+
   /** Queue batch size */
   QUEUE_BATCH: 100,
-  
+
   /** FoF ranking batch */
   FOF_RANKING: 100,
+} as const;
+
+/**
+ * Placeholder images (SVG data URIs)
+ */
+export const PLACEHOLDERS = {
+  /** Default avatar - simple user silhouette */
+  AVATAR: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect fill='%231d9bf0' width='128' height='128'/%3E%3Ccircle fill='%23fff' cx='64' cy='48' r='24'/%3E%3Cpath fill='%23fff' d='M64 80c-28 0-48 16-48 32v16h96v-16c0-16-20-32-48-32z'/%3E%3C/svg%3E",
+
+  /** Default banner - gradient background */
+  BANNER: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 200'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%231d9bf0'/%3E%3Cstop offset='100%25' stop-color='%230d4f7a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect fill='url(%23g)' width='600' height='200'/%3E%3C/svg%3E",
 } as const;

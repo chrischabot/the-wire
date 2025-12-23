@@ -161,7 +161,7 @@ app.get('/', (c) => {
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
 </body>
 </html>
   `;
@@ -242,7 +242,7 @@ app.get('/signup', (c) => {
     </p>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
   <script>
     const form = document.getElementById('signup-form');
     const submitBtn = document.getElementById('submit-btn');
@@ -336,7 +336,7 @@ app.get('/login', (c) => {
     </p>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
   <script>
     const form = document.getElementById('login-form');
     const submitBtn = document.getElementById('submit-btn');
@@ -425,11 +425,6 @@ app.get('/home', (c) => {
         <h2>Home</h2>
       </div>
 
-      <div class="tabs">
-        <button class="tab active">For you</button>
-        <button class="tab">Following</button>
-      </div>
-
       <div class="compose-box">
         <div style="display: flex; gap: 12px;">
           <img id="compose-avatar" class="avatar" src="" alt="Your avatar" style="display: none;">
@@ -440,13 +435,21 @@ app.get('/home', (c) => {
                 placeholder="What's happening?"
                 maxlength="280"
               ></textarea>
+              <div id="media-preview" class="media-preview" style="display: none;">
+                <div id="media-preview-content"></div>
+                <button type="button" id="remove-media" class="remove-media">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+              </div>
               <div class="compose-footer">
                 <div class="compose-actions">
-                  <button type="button" class="icon-button" title="Media">
+                  <input type="file" id="image-upload" accept="image/*" style="display: none;">
+                  <button type="button" class="icon-button" id="image-btn" title="Add image">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
                   </button>
-                  <button type="button" class="icon-button" title="Emoji">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>
+                  <input type="file" id="video-upload" accept="video/*" style="display: none;">
+                  <button type="button" class="icon-button" id="video-btn" title="Add video">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
                   </button>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
@@ -483,7 +486,7 @@ app.get('/home', (c) => {
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
   <script>
     if (!auth.isAuthenticated()) {
       window.location.href = '/login';
@@ -561,8 +564,8 @@ app.get('/home', (c) => {
     textarea.addEventListener('input', () => {
       const length = textarea.value.length;
       charCounter.textContent = length + ' / 280';
-      
-      if (length === 0) {
+
+      if (length === 0 && !selectedMedia) {
         postBtn.disabled = true;
       } else if (length > 260) {
         charCounter.className = 'char-counter warning';
@@ -577,7 +580,7 @@ app.get('/home', (c) => {
       e.preventDefault();
       
       const content = textarea.value.trim();
-      if (!content) return;
+      if (!content && !selectedMedia) return;
 
       composeError.textContent = '';
       composeSuccess.textContent = '';
@@ -585,14 +588,28 @@ app.get('/home', (c) => {
       postBtn.textContent = 'Posting...';
 
       try {
-        const response = await posts.create(content);
-        
+        let mediaUrls = [];
+
+        // Upload media if selected
+        if (selectedMedia) {
+          postBtn.textContent = 'Uploading...';
+          const mediaUrl = await uploadMedia(selectedMedia.file);
+          mediaUrls = [mediaUrl];
+        }
+
+        const response = await posts.create(content, mediaUrls);
+
         if (response.success) {
           composeSuccess.textContent = 'Posted!';
           textarea.value = '';
           charCounter.textContent = '0 / 280';
           charCounter.className = 'char-counter';
-          
+          selectedMedia = null;
+          mediaPreview.style.display = 'none';
+          mediaPreviewContent.innerHTML = '';
+          imageUpload.value = '';
+          videoUpload.value = '';
+
           setTimeout(() => {
             loadTimeline();
             composeSuccess.textContent = '';
@@ -606,23 +623,52 @@ app.get('/home', (c) => {
       }
     });
 
+    function renderQuotedPost(originalPost) {
+      if (!originalPost) return '';
+
+      const mediaHtml = originalPost.mediaUrls && originalPost.mediaUrls.length > 0
+        ? '<div class="quoted-post-media">' + originalPost.mediaUrls.map(function(url) {
+            if (url.match(/\\.(mp4|webm|mov)$/i)) {
+              return '<video src="' + url + '" controls></video>';
+            }
+            return '<img src="' + url + '" alt="Media">';
+          }).join('') + '</div>'
+        : '';
+
+      return '<div class="quoted-post" onclick="event.stopPropagation(); window.location.href=\\'/post/' + originalPost.id + '\\'">' +
+        '<div class="quoted-post-header">' +
+          '<span class="quoted-post-author">' + escapeHtml(originalPost.authorDisplayName) + '</span>' +
+          '<span class="quoted-post-handle">@' + originalPost.authorHandle + '</span>' +
+        '</div>' +
+        '<div class="quoted-post-content">' + linkifyMentions(escapeHtml(originalPost.content)) + '</div>' +
+        mediaHtml +
+      '</div>';
+    }
+
     function renderTimeline(posts) {
       if (!posts || posts.length === 0) {
-        timeline.innerHTML = '<div class="empty-state">No posts yet. Follow users to see their posts!</div>';
+        timeline.innerHTML = '<div class="empty-state">No posts yet. Create a post or follow users to see content!</div>';
         return;
       }
 
       timeline.innerHTML = posts.map(post => {
         const date = new Date(post.createdAt);
         const timeStr = formatTimeAgo(date);
-        
-        const avatarHtml = post.authorAvatarUrl 
+
+        const avatarHtml = post.authorAvatarUrl
           ? '<img src="' + post.authorAvatarUrl + '" class="avatar" alt="' + post.authorDisplayName + '">'
           : '<div class="avatar" style="background: #1D9BF0;"></div>';
-        
+
         const likedClass = post.hasLiked ? ' liked' : '';
-        
-        return '<div class="post-card" data-post-id="' + post.id + '" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
+
+        // Check if this is a repost with quoted content
+        const quotedPostHtml = post.originalPost ? renderQuotedPost(post.originalPost) : '';
+        const isRepost = !!post.repostOfId;
+        const repostIndicator = isRepost && !post.content
+          ? '<div class="repost-indicator"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg> ' + escapeHtml(post.authorDisplayName) + ' reposted</div>'
+          : '';
+
+        return repostIndicator + '<div class="post-card" data-post-id="' + post.id + '" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
           '<div class="post-header">' +
             '<a href="/u/' + post.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
             '<div class="post-body">' +
@@ -631,14 +677,30 @@ app.get('/home', (c) => {
                 '<a href="/u/' + post.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + post.authorHandle + '</a>' +
                 '<span class="post-timestamp">' + timeStr + '</span>' +
               '</div>' +
-              '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
+              (post.content ? '<div class="post-content">' + linkifyMentions(escapeHtml(post.content)) + '</div>' : '') +
+              (post.mediaUrls && post.mediaUrls.length > 0 ? '<div class="post-media">' + post.mediaUrls.map(function(url) {
+                if (url.match(/\\.(mp4|webm|mov)$/i)) {
+                  return '<video src="' + url + '" controls class="post-media-item"></video>';
+                }
+                return '<img src="' + url + '" class="post-media-item" alt="Post media">';
+              }).join('') + '</div>' : '') +
+              quotedPostHtml +
               '<div class="post-actions" onclick="event.stopPropagation()">' +
-                '<span class="post-action">💬 ' + post.replyCount + '</span>' +
-                '<span class="post-action">🔁 ' + post.repostCount + '</span>' +
-                '<span class="post-action' + likedClass + '" data-action="like" data-post-id="' + post.id + '">' +
-                  '❤️ <span class="like-count">' + post.likeCount + '</span>' +
+                '<span class="post-action">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+                  ' ' + post.replyCount +
                 '</span>' +
-                '<span class="post-action">📊</span>' +
+                '<span class="post-action">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
+                  ' ' + post.repostCount +
+                '</span>' +
+                '<span class="post-action' + likedClass + '" data-action="like" data-post-id="' + post.id + '">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' +
+                  ' <span class="like-count">' + post.likeCount + '</span>' +
+                '</span>' +
+                '<span class="post-action">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>' +
+                '</span>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -687,6 +749,76 @@ app.get('/home', (c) => {
       if (seconds < 604800) return Math.floor(seconds / 86400) + 'd';
       
       return date.toLocaleDateString();
+    }
+
+    // Media upload handling
+    let selectedMedia = null;
+    const imageUpload = document.getElementById('image-upload');
+    const videoUpload = document.getElementById('video-upload');
+    const imageBtn = document.getElementById('image-btn');
+    const videoBtn = document.getElementById('video-btn');
+    const mediaPreview = document.getElementById('media-preview');
+    const mediaPreviewContent = document.getElementById('media-preview-content');
+    const removeMediaBtn = document.getElementById('remove-media');
+
+    imageBtn.addEventListener('click', () => imageUpload.click());
+    videoBtn.addEventListener('click', () => videoUpload.click());
+
+    imageUpload.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        selectedMedia = { file, type: 'image' };
+        showMediaPreview(file, 'image');
+      }
+    });
+
+    videoUpload.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        selectedMedia = { file, type: 'video' };
+        showMediaPreview(file, 'video');
+      }
+    });
+
+    function showMediaPreview(file, type) {
+      const url = URL.createObjectURL(file);
+      if (type === 'image') {
+        mediaPreviewContent.innerHTML = '<img src="' + url + '" alt="Preview">';
+      } else {
+        mediaPreviewContent.innerHTML = '<video src="' + url + '" controls></video>';
+      }
+      mediaPreview.style.display = 'flex';
+      postBtn.disabled = false;
+    }
+
+    removeMediaBtn.addEventListener('click', () => {
+      selectedMedia = null;
+      mediaPreview.style.display = 'none';
+      mediaPreviewContent.innerHTML = '';
+      imageUpload.value = '';
+      videoUpload.value = '';
+      if (textarea.value.length === 0) {
+        postBtn.disabled = true;
+      }
+    });
+
+    async function uploadMedia(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/media/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + localStorage.getItem('auth_token'),
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        return data.data.url;
+      }
+      throw new Error(data.error || 'Upload failed');
     }
 
     loadTimeline();
@@ -747,13 +879,6 @@ app.get('/explore', (c) => {
         <h2>Explore</h2>
       </div>
 
-      <div class="tabs">
-        <button class="tab active">For you</button>
-        <button class="tab">Trending</button>
-        <button class="tab">News</button>
-        <button class="tab">Sports</button>
-      </div>
-
       <div id="explore-content">
         <div class="empty-state">Loading trending content...</div>
       </div>
@@ -765,30 +890,10 @@ app.get('/explore', (c) => {
         <input type="text" class="search-input" placeholder="Search">
       </div>
       
-      <div class="widget-box">
-        <div class="widget-header">Trending</div>
-        <div id="trending-topics">
-          <div class="widget-item">
-            <div class="widget-item-meta">Trending · Technology</div>
-            <div class="widget-item-title">#CloudflareWorkers</div>
-            <div class="widget-item-meta">2.5K posts</div>
-          </div>
-          <div class="widget-item">
-            <div class="widget-item-meta">Trending · Web Development</div>
-            <div class="widget-item-title">#EdgeComputing</div>
-            <div class="widget-item-meta">1.8K posts</div>
-          </div>
-          <div class="widget-item">
-            <div class="widget-item-meta">Trending · Programming</div>
-            <div class="widget-item-title">#TypeScript</div>
-            <div class="widget-item-meta">3.2K posts</div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
   <script>
     async function setProfileLink() {
       try {
@@ -804,28 +909,53 @@ app.get('/explore', (c) => {
       setProfileLink();
     }
 
+    function renderQuotedPost(originalPost) {
+      if (!originalPost) return '';
+
+      const mediaHtml = originalPost.mediaUrls && originalPost.mediaUrls.length > 0
+        ? '<div class="quoted-post-media">' + originalPost.mediaUrls.map(function(url) {
+            return '<img src="' + url + '" alt="Media">';
+          }).join('') + '</div>'
+        : '';
+
+      return '<div class="quoted-post" onclick="event.stopPropagation(); window.location.href=\\'/post/' + originalPost.id + '\\'">' +
+        '<div class="quoted-post-header">' +
+          '<span class="quoted-post-author">' + escapeHtml(originalPost.authorDisplayName) + '</span>' +
+          '<span class="quoted-post-handle">@' + originalPost.authorHandle + '</span>' +
+        '</div>' +
+        '<div class="quoted-post-content">' + linkifyMentions(escapeHtml(originalPost.content)) + '</div>' +
+        mediaHtml +
+      '</div>';
+    }
+
     async function loadExploreFeed() {
       try {
         const headers = {};
         if (auth.isAuthenticated()) {
           headers['Authorization'] = 'Bearer ' + localStorage.getItem('auth_token');
         }
-        
+
         const response = await fetch('/api/feed/global?limit=20', { headers });
         const data = await response.json();
-        
+
         const exploreContent = document.getElementById('explore-content');
-        
+
         if (data.success && data.data.posts && data.data.posts.length > 0) {
           exploreContent.innerHTML = data.data.posts.map(post => {
             const date = new Date(post.createdAt);
             const timeStr = formatTimeAgo(date);
-            
-            const avatarHtml = post.authorAvatarUrl 
+
+            const avatarHtml = post.authorAvatarUrl
               ? '<img src="' + post.authorAvatarUrl + '" class="avatar" alt="' + post.authorDisplayName + '">'
               : '<div class="avatar" style="background: #1D9BF0;"></div>';
-            
-            return '<div class="post-card" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
+
+            const quotedPostHtml = post.originalPost ? renderQuotedPost(post.originalPost) : '';
+            const isRepost = !!post.repostOfId;
+            const repostIndicator = isRepost && !post.content
+              ? '<div class="repost-indicator"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg> ' + escapeHtml(post.authorDisplayName) + ' reposted</div>'
+              : '';
+
+            return repostIndicator + '<div class="post-card" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
               '<div class="post-header">' +
                 '<a href="/u/' + post.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
                 '<div class="post-body">' +
@@ -834,7 +964,12 @@ app.get('/explore', (c) => {
                     '<a href="/u/' + post.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + post.authorHandle + '</a>' +
                     '<span class="post-timestamp">' + timeStr + '</span>' +
                   '</div>' +
-                  '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
+                  (post.content ? '<div class="post-content">' + linkifyMentions(escapeHtml(post.content)) + '</div>' : '') +
+                  (post.mediaUrls && post.mediaUrls.length > 0 ?
+                    '<div class="post-media">' + post.mediaUrls.map(url =>
+                      '<img src="' + url + '" class="post-media-item" alt="Post media">'
+                    ).join('') + '</div>' : '') +
+                  quotedPostHtml +
                   '<div class="post-actions" onclick="event.stopPropagation()">' +
                     '<span class="post-action">' +
                       '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
@@ -934,11 +1069,6 @@ app.get('/notifications', (c) => {
         <h2>Notifications</h2>
       </div>
 
-      <div class="tabs">
-        <button class="tab active">All</button>
-        <button class="tab">Mentions</button>
-      </div>
-
       <div id="notifications-list">
         <div class="empty-state">Loading notifications...</div>
       </div>
@@ -952,7 +1082,7 @@ app.get('/notifications', (c) => {
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
   <script>
     if (!auth.isAuthenticated()) {
       window.location.href = '/login';
@@ -972,10 +1102,9 @@ app.get('/notifications', (c) => {
 
     async function loadNotifications() {
       try {
-        const response = await notifications.getNotifications();
-        
+        const response = await notifications.getAll();
         const notificationsList = document.getElementById('notifications-list');
-        
+
         if (response.success && response.data.notifications && response.data.notifications.length > 0) {
           notificationsList.innerHTML = response.data.notifications.map(notif => {
             const date = new Date(notif.createdAt);
@@ -1001,16 +1130,32 @@ app.get('/notifications', (c) => {
                 iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1D9BF0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
                 notifText = notif.actorDisplayName + ' replied to your post';
                 break;
+              case 'mention':
+                iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1D9BF0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg>';
+                notifText = notif.actorDisplayName + ' mentioned you';
+                break;
+              case 'quote':
+                iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00BA7C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 6H3"/><path d="M21 12H8"/><path d="M21 18H8"/><path d="M3 12v6"/></svg>';
+                notifText = notif.actorDisplayName + ' quoted your post';
+                break;
               default:
                 iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
-                notifText = notif.actorDisplayName + ' interacted with your content';
+                notifText = notif.actorDisplayName + ' interacted with you';
             }
             
-            const avatarHtml = notif.actorAvatarUrl 
+            const avatarHtml = notif.actorAvatarUrl
               ? '<img src="' + notif.actorAvatarUrl + '" class="avatar avatar-sm" alt="' + notif.actorDisplayName + '">'
               : '<div class="avatar avatar-sm" style="background: #1D9BF0;"></div>';
-            
-            return '<div class="post-card" style="cursor: default;">' +
+
+            // Determine link destination
+            let href = '#';
+            if (notif.type === 'follow') {
+              href = '/u/' + notif.actorHandle;
+            } else if (notif.postId) {
+              href = '/post/' + notif.postId;
+            }
+
+            return '<a href="' + href + '" class="post-card" style="text-decoration: none; color: inherit; display: block;">' +
               '<div style="display: flex; gap: 12px;">' +
                 '<div style="width: 32px; flex-shrink: 0;">' + iconSvg + '</div>' +
                 '<div style="flex: 1;">' +
@@ -1019,10 +1164,10 @@ app.get('/notifications', (c) => {
                     '<strong>' + escapeHtml(notifText) + '</strong>' +
                   '</div>' +
                   '<div style="color: var(--muted-foreground); font-size: 13px;">' + timeStr + '</div>' +
-                  (notif.postContent ? '<div style="margin-top: 8px; color: var(--muted-foreground); font-size: 14px;">' + escapeHtml(notif.postContent) + '</div>' : '') +
+                  (notif.content ? '<div style="margin-top: 8px; color: var(--muted-foreground); font-size: 14px;">' + escapeHtml(notif.content) + '</div>' : '') +
                 '</div>' +
               '</div>' +
-            '</div>';
+            '</a>';
           }).join('');
         } else {
           notificationsList.innerHTML = '<div class="empty-state">No notifications yet</div>';
@@ -1071,31 +1216,31 @@ app.get('/post/:id', (c) => {
   <div class="twitter-layout">
     <!-- Left Sidebar -->
     <div class="sidebar-left">
-      <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
-      </div>
-      
+      <a href="/home" class="logo">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+      </a>
+
       <a href="/home" class="nav-item">
-        <span class="nav-icon">🏠</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         <span>Home</span>
       </a>
       <a href="/explore" class="nav-item">
-        <span class="nav-icon">🔍</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <span>Explore</span>
       </a>
       <a href="/notifications" class="nav-item">
-        <span class="nav-icon">🔔</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span>Notifications</span>
       </a>
-      <a href="/u/me" class="nav-item">
-        <span class="nav-icon">👤</span>
+      <a href="#" class="nav-item" id="profile-nav">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>Profile</span>
       </a>
       <a href="/settings" class="nav-item">
-        <span class="nav-icon">⚙️</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         <span>Settings</span>
       </a>
-      
+
       <button class="post-button">Post</button>
     </div>
 
@@ -1112,28 +1257,39 @@ app.get('/post/:id', (c) => {
 
       <!-- Reply Composer -->
       <div id="reply-composer" style="display: none;">
-        <div class="compose-box">
-          <div style="display: flex; gap: 12px;">
+        <div class="compose-box reply-compose-box">
+          <div id="replying-to" class="replying-to"></div>
+          <div class="reply-input-row">
             <img id="reply-avatar" class="avatar" src="" alt="Your avatar">
-            <div style="flex: 1;">
-              <form id="reply-form">
-                <textarea 
-                  id="reply-content" 
-                  placeholder="Post your reply"
-                  maxlength="280"
-                ></textarea>
-                <div class="compose-footer">
-                  <div class="compose-actions">
-                    <button type="button" class="icon-button">📷</button>
-                    <button type="button" class="icon-button">😊</button>
-                  </div>
-                  <div style="display: flex; align-items: center; gap: 12px;">
-                    <span id="reply-char-counter" class="char-counter">0 / 280</span>
-                    <button type="submit" class="tweet-button" id="reply-btn" disabled>Reply</button>
-                  </div>
+            <form id="reply-form" class="reply-form">
+              <textarea
+                id="reply-content"
+                placeholder="Post your reply"
+                maxlength="280"
+              ></textarea>
+              <div id="reply-media-preview" class="media-preview" style="display: none;">
+                <div id="reply-media-preview-content"></div>
+                <button type="button" id="reply-remove-media" class="remove-media">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+              </div>
+              <div class="reply-footer">
+                <div class="compose-actions">
+                  <input type="file" id="reply-image-upload" accept="image/*" style="display: none;">
+                  <button type="button" class="icon-button" id="reply-image-btn" title="Add image">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                  </button>
+                  <input type="file" id="reply-video-upload" accept="video/*" style="display: none;">
+                  <button type="button" class="icon-button" id="reply-video-btn" title="Add video">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+                  </button>
                 </div>
-              </form>
-            </div>
+                <div class="reply-submit-area">
+                  <span id="reply-char-counter" class="char-counter">0 / 280</span>
+                  <button type="submit" class="tweet-button" id="reply-btn" disabled>Reply</button>
+                </div>
+              </div>
+            </form>
           </div>
           <div id="reply-error" class="error"></div>
           <div id="reply-success" class="success"></div>
@@ -1152,29 +1308,60 @@ app.get('/post/:id', (c) => {
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
   <script>
     const postId = '${postId}';
     let currentUser = null;
 
+    function renderQuotedPostDetail(originalPost) {
+      if (!originalPost) return '';
+
+      const mediaHtml = originalPost.mediaUrls && originalPost.mediaUrls.length > 0
+        ? '<div class="quoted-post-media">' + originalPost.mediaUrls.map(function(url) {
+            if (url.match(/\\.(mp4|webm|mov)$/i)) {
+              return '<video src="' + url + '" controls></video>';
+            }
+            return '<img src="' + url + '" alt="Media">';
+          }).join('') + '</div>'
+        : '';
+
+      return '<div class="quoted-post" onclick="window.location.href=\\'/post/' + originalPost.id + '\\'">' +
+        '<div class="quoted-post-header">' +
+          '<span class="quoted-post-author">' + escapeHtml(originalPost.authorDisplayName) + '</span>' +
+          '<span class="quoted-post-handle">@' + originalPost.authorHandle + '</span>' +
+        '</div>' +
+        '<div class="quoted-post-content">' + linkifyMentions(escapeHtml(originalPost.content)) + '</div>' +
+        mediaHtml +
+      '</div>';
+    }
+
     async function loadPost() {
       try {
         const response = await posts.get(postId);
-        
+
         if (response.success) {
           const post = response.data;
           const date = new Date(post.createdAt);
-          const fullTime = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' · ' + 
+          const fullTime = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' · ' +
                           date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          
+
           const avatarHtml = post.authorAvatarUrl
             ? '<img src="' + post.authorAvatarUrl + '" class="avatar" alt="' + post.authorDisplayName + '">'
             : '<div class="avatar" style="background: #1D9BF0;"></div>';
-          
+
           const likedClass = post.hasLiked ? ' liked' : '';
-          
+          const repostedClass = post.hasReposted ? ' reposted' : '';
+
+          // Check if this is a repost
+          const isRepost = !!post.repostOfId;
+          const quotedPostHtml = post.originalPost ? renderQuotedPostDetail(post.originalPost) : '';
+          const repostIndicator = isRepost
+            ? '<div class="repost-indicator" style="padding-left: 0; margin-bottom: 12px;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg> ' + escapeHtml(post.authorDisplayName) + ' reposted</div>'
+            : '';
+
           document.getElementById('post-container').innerHTML =
-            '<div style="padding: 12px 16px; border-bottom: 1px solid #EFF3F4;">' +
+            '<div style="padding: 12px 16px; border-bottom: 1px solid var(--border-color);">' +
+              repostIndicator +
               '<div class="post-header">' +
                 '<a href="/u/' + post.authorHandle + '">' + avatarHtml + '</a>' +
                 '<div class="post-body">' +
@@ -1184,22 +1371,54 @@ app.get('/post/:id', (c) => {
                   '</div>' +
                 '</div>' +
               '</div>' +
-              '<div class="post-content" style="font-size: 23px; line-height: 28px; margin: 12px 0;">' + escapeHtml(post.content) + '</div>' +
-              '<div style="color: #536471; font-size: 15px; margin: 12px 0; padding-bottom: 12px; border-bottom: 1px solid #EFF3F4;">' + fullTime + '</div>' +
-              '<div class="post-actions" style="border-bottom: 1px solid #EFF3F4; padding: 12px 0;">' +
-                '<span class="post-action">💬 <span id="reply-count">' + post.replyCount + '</span></span>' +
-                '<span class="post-action">🔁 ' + post.repostCount + '</span>' +
-                '<span class="post-action' + likedClass + '" id="like-btn">' +
-                  '❤️ <span id="like-count">' + post.likeCount + '</span>' +
+              (post.content ? '<div class="post-content" style="font-size: 23px; line-height: 28px; margin: 12px 0;">' + linkifyMentions(escapeHtml(post.content)) + '</div>' : '') +
+              (post.mediaUrls && post.mediaUrls.length > 0 ? '<div class="post-media">' + post.mediaUrls.map(function(url) {
+                if (url.match(/\\.(mp4|webm|mov)$/i)) {
+                  return '<video src="' + url + '" controls class="post-media-item"></video>';
+                }
+                return '<img src="' + url + '" class="post-media-item" alt="Post media">';
+              }).join('') + '</div>' : '') +
+              quotedPostHtml +
+              '<div style="color: #536471; font-size: 15px; margin: 12px 0; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">' + fullTime + '</div>' +
+              '<div class="post-actions" style="padding: 12px 0;">' +
+                '<span class="post-action">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+                  ' <span id="reply-count">' + post.replyCount + '</span>' +
                 '</span>' +
-                '<span class="post-action">📊</span>' +
+                '<span class="post-action' + repostedClass + '" id="repost-btn">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
+                  ' <span id="repost-count">' + post.repostCount + '</span>' +
+                '</span>' +
+                '<span class="post-action' + likedClass + '" id="like-btn">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' +
+                  ' <span id="like-count">' + post.likeCount + '</span>' +
+                '</span>' +
+                '<span class="post-action">' +
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>' +
+                '</span>' +
               '</div>' +
             '</div>';
 
           if (auth.isAuthenticated()) {
             document.getElementById('like-btn').addEventListener('click', handleLike);
+            document.getElementById('repost-btn').addEventListener('click', handleRepost);
             document.getElementById('reply-composer').style.display = 'block';
             setupReplyComposer();
+
+            // Populate "Replying to" with author and mentioned users
+            const replyingToEl = document.getElementById('replying-to');
+            const mentionedUsers = new Set();
+            mentionedUsers.add(post.authorHandle);
+
+            // Extract @mentions from post content
+            const mentionMatches = post.content.match(/@([a-zA-Z0-9_]{1,15})/g);
+            if (mentionMatches) {
+              mentionMatches.forEach(m => mentionedUsers.add(m.substring(1)));
+            }
+
+            const handles = Array.from(mentionedUsers);
+            const links = handles.map(h => '<a href="/u/' + h + '" class="replying-to-link">@' + h + '</a>');
+            replyingToEl.innerHTML = 'Replying to ' + links.join(' ');
           }
           
           loadReplies();
@@ -1212,14 +1431,16 @@ app.get('/post/:id', (c) => {
 
     async function loadUserProfile() {
       if (!auth.isAuthenticated()) return;
-      
+
       try {
         const response = await auth.me();
         if (response.success) {
+          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+
           const profileResp = await users.getProfile(response.data.handle);
           if (profileResp.success) {
             currentUser = profileResp.data;
-            
+
             const replyAvatar = document.getElementById('reply-avatar');
             if (currentUser.avatarUrl) {
               replyAvatar.src = currentUser.avatarUrl;
@@ -1241,17 +1462,87 @@ app.get('/post/:id', (c) => {
       const replyError = document.getElementById('reply-error');
       const replySuccess = document.getElementById('reply-success');
 
+      // Reply media upload handling
+      let replySelectedMedia = null;
+      const replyImageUpload = document.getElementById('reply-image-upload');
+      const replyVideoUpload = document.getElementById('reply-video-upload');
+      const replyImageBtn = document.getElementById('reply-image-btn');
+      const replyVideoBtn = document.getElementById('reply-video-btn');
+      const replyMediaPreview = document.getElementById('reply-media-preview');
+      const replyMediaPreviewContent = document.getElementById('reply-media-preview-content');
+      const replyRemoveMediaBtn = document.getElementById('reply-remove-media');
+
+      replyImageBtn.addEventListener('click', () => replyImageUpload.click());
+      replyVideoBtn.addEventListener('click', () => replyVideoUpload.click());
+
+      replyImageUpload.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          replySelectedMedia = { file, type: 'image' };
+          showReplyMediaPreview(file, 'image');
+        }
+      });
+
+      replyVideoUpload.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          replySelectedMedia = { file, type: 'video' };
+          showReplyMediaPreview(file, 'video');
+        }
+      });
+
+      function showReplyMediaPreview(file, type) {
+        const url = URL.createObjectURL(file);
+        if (type === 'image') {
+          replyMediaPreviewContent.innerHTML = '<img src="' + url + '" alt="Preview">';
+        } else {
+          replyMediaPreviewContent.innerHTML = '<video src="' + url + '" controls></video>';
+        }
+        replyMediaPreview.style.display = 'flex';
+        replyBtn.disabled = false;
+      }
+
+      replyRemoveMediaBtn.addEventListener('click', () => {
+        replySelectedMedia = null;
+        replyMediaPreview.style.display = 'none';
+        replyMediaPreviewContent.innerHTML = '';
+        replyImageUpload.value = '';
+        replyVideoUpload.value = '';
+        if (replyTextarea.value.length === 0) {
+          replyBtn.disabled = true;
+        }
+      });
+
+      async function uploadReplyMedia(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/api/media/upload', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('auth_token'),
+          },
+          body: formData,
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          return data.data.url;
+        }
+        throw new Error(data.error || 'Upload failed');
+      }
+
       replyTextarea.addEventListener('input', () => {
         const length = replyTextarea.value.length;
         replyCounter.textContent = length + ' / 280';
-        replyBtn.disabled = length === 0;
+        replyBtn.disabled = length === 0 && !replySelectedMedia;
       });
 
       replyForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
+
         const content = replyTextarea.value.trim();
-        if (!content) return;
+        if (!content && !replySelectedMedia) return;
 
         replyError.textContent = '';
         replySuccess.textContent = '';
@@ -1259,18 +1550,32 @@ app.get('/post/:id', (c) => {
         replyBtn.textContent = 'Replying...';
 
         try {
-          const response = await posts.create(content, [], postId, null);
-          
+          let mediaUrls = [];
+
+          // Upload media if selected
+          if (replySelectedMedia) {
+            replyBtn.textContent = 'Uploading...';
+            const mediaUrl = await uploadReplyMedia(replySelectedMedia.file);
+            mediaUrls = [mediaUrl];
+          }
+
+          const response = await posts.create(content, mediaUrls, postId, null);
+
           if (response.success) {
             replySuccess.textContent = 'Reply posted!';
             replyTextarea.value = '';
             replyCounter.textContent = '0 / 280';
-            
+            replySelectedMedia = null;
+            replyMediaPreview.style.display = 'none';
+            replyMediaPreviewContent.innerHTML = '';
+            replyImageUpload.value = '';
+            replyVideoUpload.value = '';
+
             const replyCountEl = document.getElementById('reply-count');
             if (replyCountEl) {
               replyCountEl.textContent = parseInt(replyCountEl.textContent) + 1;
             }
-            
+
             setTimeout(() => {
               loadReplies();
               replySuccess.textContent = '';
@@ -1312,12 +1617,27 @@ app.get('/post/:id', (c) => {
                     '<a href="/u/' + reply.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + reply.authorHandle + '</a>' +
                     '<span class="post-timestamp">' + timeStr + '</span>' +
                   '</div>' +
-                  '<div class="post-content">' + escapeHtml(reply.content) + '</div>' +
+                  '<div class="post-content">' + linkifyMentions(escapeHtml(reply.content)) + '</div>' +
+                  (reply.mediaUrls && reply.mediaUrls.length > 0 ?
+                    '<div class="post-media">' + reply.mediaUrls.map(url =>
+                      '<img src="' + url + '" class="post-media-item" alt="Reply media">'
+                    ).join('') + '</div>' : '') +
                   '<div class="post-actions" onclick="event.stopPropagation()">' +
-                    '<span class="post-action">💬 ' + reply.replyCount + '</span>' +
-                    '<span class="post-action">🔁 ' + reply.repostCount + '</span>' +
-                    '<span class="post-action' + likedClass + '">❤️ ' + reply.likeCount + '</span>' +
-                    '<span class="post-action">📊</span>' +
+                    '<span class="post-action">' +
+                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+                      ' ' + reply.replyCount +
+                    '</span>' +
+                    '<span class="post-action">' +
+                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
+                      ' ' + reply.repostCount +
+                    '</span>' +
+                    '<span class="post-action' + likedClass + '">' +
+                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' +
+                      ' ' + reply.likeCount +
+                    '</span>' +
+                    '<span class="post-action">' +
+                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>' +
+                    '</span>' +
                   '</div>' +
                 '</div>' +
               '</div>' +
@@ -1349,6 +1669,27 @@ app.get('/post/:id', (c) => {
         }
       } catch (error) {
         console.error('Error liking post:', error);
+      }
+    }
+
+    async function handleRepost() {
+      const repostBtn = document.getElementById('repost-btn');
+      const repostCount = document.getElementById('repost-count');
+
+      // Don't allow reposting if already reposted
+      if (repostBtn.classList.contains('reposted')) {
+        return;
+      }
+
+      try {
+        const response = await posts.repost(postId);
+        if (response.success) {
+          repostBtn.classList.add('reposted');
+          repostCount.textContent = parseInt(repostCount.textContent) + 1;
+        }
+      } catch (error) {
+        console.error('Error reposting:', error);
+        alert(error.message || 'Could not repost');
       }
     }
 
@@ -1526,7 +1867,7 @@ app.get('/settings', (c) => {
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
+  <script src="/js/api.js?v=6"></script>
   <script>
     if (!auth.isAuthenticated()) {
       window.location.href = '/login';
@@ -1686,31 +2027,31 @@ app.get('/u/:handle', (c) => {
   <div class="twitter-layout">
     <!-- Left Sidebar -->
     <div class="sidebar-left">
-      <div class="logo">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path></svg>
-      </div>
-      
+      <a href="/home" class="logo">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+      </a>
+
       <a href="/home" class="nav-item">
-        <span class="nav-icon">🏠</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         <span>Home</span>
       </a>
       <a href="/explore" class="nav-item">
-        <span class="nav-icon">🔍</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <span>Explore</span>
       </a>
       <a href="/notifications" class="nav-item">
-        <span class="nav-icon">🔔</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span>Notifications</span>
       </a>
-      <a href="/u/me" class="nav-item active">
-        <span class="nav-icon">👤</span>
+      <a href="#" class="nav-item active" id="profile-nav">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>Profile</span>
       </a>
       <a href="/settings" class="nav-item">
-        <span class="nav-icon">⚙️</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         <span>Settings</span>
       </a>
-      
+
       <button class="post-button">Post</button>
     </div>
 
@@ -1733,12 +2074,38 @@ app.get('/u/:handle', (c) => {
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
+  <!-- Image Modal -->
+  <div id="image-modal" class="image-modal" onclick="closeImageModal()">
+    <button class="image-modal-close" onclick="closeImageModal()">&times;</button>
+    <img id="modal-image" src="" alt="Full size image" onclick="event.stopPropagation()">
+  </div>
+
+  <script src="/js/api.js?v=6"></script>
   <script>
     const handle = '${handle}';
     let profileUser = null;
     let currentUserId = null;
     let isFollowing = false;
+
+    // Image modal functions
+    function openImageModal(imageUrl) {
+      const modal = document.getElementById('image-modal');
+      const modalImg = document.getElementById('modal-image');
+      modalImg.src = imageUrl;
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeImageModal() {
+      const modal = document.getElementById('image-modal');
+      modal.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    // Close modal on escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeImageModal();
+    });
 
     async function loadProfile() {
       try {
@@ -1746,6 +2113,7 @@ app.get('/u/:handle', (c) => {
           const meResp = await auth.me();
           if (meResp.success) {
             currentUserId = meResp.data.id;
+            document.getElementById('profile-nav').href = '/u/' + meResp.data.handle;
           }
         }
 
@@ -1784,11 +2152,11 @@ app.get('/u/:handle', (c) => {
       }
 
       const bannerHtml = profileUser.bannerUrl
-        ? '<img src="' + profileUser.bannerUrl + '" class="profile-banner" alt="Banner">'
+        ? '<img src="' + profileUser.bannerUrl + '" class="profile-banner profile-banner-clickable" alt="Banner" onclick="openImageModal(\\'' + profileUser.bannerUrl + '\\')">'
         : '<div class="profile-banner"></div>';
 
       const avatarHtml = profileUser.avatarUrl
-        ? '<img src="' + profileUser.avatarUrl + '" class="avatar avatar-lg" alt="' + profileUser.displayName + '">'
+        ? '<img src="' + profileUser.avatarUrl + '" class="avatar avatar-lg profile-avatar-clickable" alt="' + profileUser.displayName + '" onclick="openImageModal(\\'' + profileUser.avatarUrl + '\\')">'
         : '<div class="avatar avatar-lg" style="background: #1D9BF0;"></div>';
 
       const joinDate = new Date(profileUser.joinedAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -1813,61 +2181,141 @@ app.get('/u/:handle', (c) => {
           '</div>' +
         '</div>' +
         '<div class="tabs">' +
-          '<button class="tab active">Posts</button>' +
-          '<button class="tab">Replies</button>' +
-          '<button class="tab">Media</button>' +
-          '<button class="tab">Likes</button>' +
+          '<button class="tab active" data-tab="posts">Posts</button>' +
+          '<button class="tab" data-tab="replies">Replies</button>' +
+          '<button class="tab" data-tab="media">Media</button>' +
+          '<button class="tab" data-tab="likes">Likes</button>' +
         '</div>' +
-        '<div id="user-posts"></div>';
+        '<div id="tab-content"></div>';
 
       if (!isOwnProfile && auth.isAuthenticated()) {
         setupFollowButton();
       }
-      
-      loadUserPosts();
+
+      setupTabs();
+      loadTabContent('posts');
+    }
+
+    let currentTab = 'posts';
+
+    function setupTabs() {
+      const tabs = document.querySelectorAll('.tab');
+      tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          const tabName = tab.dataset.tab;
+          if (tabName === currentTab) return;
+
+          tabs.forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          currentTab = tabName;
+          loadTabContent(tabName);
+        });
+      });
+    }
+
+    async function loadTabContent(tabName) {
+      const container = document.getElementById('tab-content');
+      container.innerHTML = '<div class="empty-state">Loading...</div>';
+
+      try {
+        let endpoint = '/api/users/' + handle + '/posts?limit=20';
+        if (tabName === 'replies') endpoint = '/api/users/' + handle + '/replies?limit=20';
+        else if (tabName === 'media') endpoint = '/api/users/' + handle + '/media?limit=20';
+        else if (tabName === 'likes') endpoint = '/api/users/' + handle + '/likes?limit=20';
+
+        const response = await fetch(endpoint);
+        const data = await response.json();
+
+        if (data.success && data.data.posts.length > 0) {
+          container.innerHTML = data.data.posts.map(post => renderPostCard(post)).join('');
+          setupLikeButtons();
+        } else {
+          const emptyMessages = {
+            posts: 'No posts yet',
+            replies: 'No replies yet',
+            media: 'No media posts yet',
+            likes: 'No liked posts yet'
+          };
+          container.innerHTML = '<div class="empty-state">' + emptyMessages[tabName] + '</div>';
+        }
+      } catch (error) {
+        console.error('Error loading ' + tabName + ':', error);
+        container.innerHTML = '<div class="error">Error loading content</div>';
+      }
+    }
+
+    function renderQuotedPost(originalPost) {
+      if (!originalPost) return '';
+
+      const mediaHtml = originalPost.mediaUrls && originalPost.mediaUrls.length > 0
+        ? '<div class="quoted-post-media">' + originalPost.mediaUrls.map(function(url) {
+            return '<img src="' + url + '" alt="Media">';
+          }).join('') + '</div>'
+        : '';
+
+      return '<div class="quoted-post" onclick="event.stopPropagation(); window.location.href=\\'/post/' + originalPost.id + '\\'">' +
+        '<div class="quoted-post-header">' +
+          '<span class="quoted-post-author">' + escapeHtml(originalPost.authorDisplayName) + '</span>' +
+          '<span class="quoted-post-handle">@' + originalPost.authorHandle + '</span>' +
+        '</div>' +
+        '<div class="quoted-post-content">' + linkifyMentions(escapeHtml(originalPost.content)) + '</div>' +
+        mediaHtml +
+      '</div>';
+    }
+
+    function renderPostCard(post) {
+      const date = new Date(post.createdAt);
+      const timeStr = formatTimeAgo(date);
+      const likedClass = post.hasLiked ? ' liked' : '';
+
+      const avatarHtml = post.authorAvatarUrl
+        ? '<img src="' + post.authorAvatarUrl + '" class="avatar" alt="' + post.authorDisplayName + '">'
+        : '<div class="avatar" style="background: #1D9BF0;"></div>';
+
+      const quotedPostHtml = post.originalPost ? renderQuotedPost(post.originalPost) : '';
+      const isRepost = !!post.repostOfId;
+      const repostIndicator = isRepost && !post.content
+        ? '<div class="repost-indicator"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg> ' + escapeHtml(post.authorDisplayName) + ' reposted</div>'
+        : '';
+
+      return repostIndicator + '<div class="post-card" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
+        '<div class="post-header">' +
+          '<a href="/u/' + post.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
+          '<div class="post-body">' +
+            '<div class="post-author-row">' +
+              '<a href="/u/' + post.authorHandle + '" class="post-author" onclick="event.stopPropagation()">' + escapeHtml(post.authorDisplayName) + '</a>' +
+              '<a href="/u/' + post.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + post.authorHandle + '</a>' +
+              '<span class="post-timestamp">' + timeStr + '</span>' +
+            '</div>' +
+            (post.content ? '<div class="post-content">' + linkifyMentions(escapeHtml(post.content)) + '</div>' : '') +
+            (post.mediaUrls && post.mediaUrls.length > 0 ?
+              '<div class="post-media">' + post.mediaUrls.map(function(url) {
+                return '<img src="' + url + '" class="post-media-item" alt="Post media">';
+              }).join('') + '</div>' : '') +
+            quotedPostHtml +
+            '<div class="post-actions" onclick="event.stopPropagation()">' +
+              '<span class="post-action">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+                ' ' + post.replyCount +
+              '</span>' +
+              '<span class="post-action">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
+                ' ' + post.repostCount +
+              '</span>' +
+              '<span class="post-action' + likedClass + '" data-action="like" data-post-id="' + post.id + '">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="' + (post.hasLiked ? '#f91880' : 'none') + '" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' +
+                ' <span class="like-count">' + post.likeCount + '</span>' +
+              '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
     }
 
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
-    }
-
-    async function loadUserPosts() {
-      try {
-        const response = await fetch('/api/users/' + handle + '/posts?limit=20');
-        const data = await response.json();
-        
-        const postsContainer = document.getElementById('user-posts');
-        
-        if (data.success && data.data.posts.length > 0) {
-          postsContainer.innerHTML = data.data.posts.map(post => {
-            const date = new Date(post.createdAt);
-            const timeStr = formatTimeAgo(date);
-            
-            return '<div class="post-card" onclick="window.location.href=\\'/post/' + post.id + '\\'">' +
-              '<div class="post-header">' +
-                '<div class="post-body">' +
-                  '<div class="post-author-row">' +
-                    '<span class="post-timestamp">' + timeStr + '</span>' +
-                  '</div>' +
-                  '<div class="post-content">' + escapeHtml(post.content) + '</div>' +
-                  '<div class="post-actions" onclick="event.stopPropagation()">' +
-                    '<span class="post-action">💬 ' + post.replyCount + '</span>' +
-                    '<span class="post-action">🔁 ' + post.repostCount + '</span>' +
-                    '<span class="post-action">❤️ ' + post.likeCount + '</span>' +
-                    '<span class="post-action">📊</span>' +
-                  '</div>' +
-                '</div>' +
-              '</div>' +
-            '</div>';
-          }).join('');
-        } else {
-          postsContainer.innerHTML = '<div class="empty-state">No posts yet</div>';
-        }
-      } catch (error) {
-        console.error('Error loading user posts:', error);
-      }
     }
 
     function formatTimeAgo(date) {
@@ -1902,6 +2350,38 @@ app.get('/u/:handle', (c) => {
             alert('Error: ' + error.message);
           }
         });
+      }
+    }
+
+    function setupLikeButtons() {
+      document.querySelectorAll('[data-action="like"]').forEach(btn => {
+        btn.addEventListener('click', handleLike);
+      });
+    }
+
+    async function handleLike(e) {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      const postId = btn.dataset.postId;
+      const isLiked = btn.classList.contains('liked');
+      const countEl = btn.querySelector('.like-count');
+      let count = parseInt(countEl.textContent) || 0;
+
+      try {
+        if (isLiked) {
+          await posts.unlike(postId);
+          btn.classList.remove('liked');
+          count--;
+          btn.querySelector('svg').setAttribute('fill', 'none');
+        } else {
+          await posts.like(postId);
+          btn.classList.add('liked');
+          count++;
+          btn.querySelector('svg').setAttribute('fill', '#f91880');
+        }
+        countEl.textContent = count;
+      } catch (error) {
+        console.error('Error toggling like:', error);
       }
     }
 
@@ -1993,6 +2473,46 @@ app.route('/api/posts', postsRoutes);
 
 // Mount feed routes
 app.route('/api/feed', feedRoutes);
+
+// Debug endpoint to check handle lookup and notifications
+app.get('/api/debug/handle/:handle', async (c) => {
+  const handle = c.req.param('handle').toLowerCase();
+  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+
+  if (!userId) {
+    return c.json({
+      success: false,
+      handle,
+      key: `handle:${handle}`,
+      error: 'Handle not found in KV'
+    });
+  }
+
+  // Check notification list
+  const notifListKey = `notification_list:${userId}`;
+  const notifList = await c.env.SESSIONS_KV.get(notifListKey);
+  const notifIds: string[] = notifList ? JSON.parse(notifList) : [];
+
+  // Fetch actual notifications
+  const notifications = [];
+  for (const notifId of notifIds.slice(0, 10)) {
+    const notifKey = `notifications:${userId}:${notifId}`;
+    const notifData = await c.env.SESSIONS_KV.get(notifKey);
+    if (notifData) {
+      notifications.push(JSON.parse(notifData));
+    } else {
+      notifications.push({ id: notifId, error: 'Data not found in KV' });
+    }
+  }
+
+  return c.json({
+    success: true,
+    handle,
+    userId,
+    notificationIds: notifIds,
+    notifications
+  });
+});
 
 // Mount media routes
 app.route('/api/media', mediaRoutes);
@@ -2688,6 +3208,45 @@ body {
   background: transparent;
 }
 
+.media-preview {
+  position: relative;
+  margin: 12px 0;
+  display: inline-block;
+  width: 100%;
+}
+
+.media-preview img,
+.media-preview video {
+  width: 100%;
+  max-height: 400px;
+  border-radius: 16px;
+  object-fit: cover;
+}
+
+.remove-media {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(15, 20, 25, 0.75);
+  backdrop-filter: blur(4px);
+  color: white;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.remove-media:hover {
+  background: rgba(15, 20, 25, 0.9);
+}
+
 .tweet-button {
   background: var(--primary);
   color: var(--primary-foreground);
@@ -2891,6 +3450,19 @@ body {
 [data-theme='lyra'] .post-content {
   font-family: var(--font-mono);
   font-size: 13px;
+}
+
+.post-media {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.post-media-item {
+  width: 100%;
+  max-height: 500px;
+  object-fit: cover;
+  display: block;
 }
 
 /* ============================================
@@ -3731,6 +4303,12 @@ const posts = {
       method: 'DELETE',
     });
   },
+
+  async repost(postId) {
+    return await apiRequest('/posts/' + postId + '/repost', {
+      method: 'POST',
+    });
+  },
 };
 
 const media = {
@@ -3834,7 +4412,7 @@ const social = {
 };
 
 const notifications = {
-  async getNotifications(cursor, limit = 20) {
+  async getAll(cursor, limit = 20) {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (cursor) params.append('cursor', cursor);
     return await apiRequest('/notifications?' + params.toString());
@@ -3844,13 +4422,13 @@ const notifications = {
     return await apiRequest('/notifications/unread-count');
   },
 
-  async markRead(notificationId) {
+  async markAsRead(notificationId) {
     return await apiRequest('/notifications/' + notificationId + '/read', {
       method: 'PUT',
     });
   },
 
-  async markAllRead() {
+  async markAllAsRead() {
     return await apiRequest('/notifications/read-all', {
       method: 'PUT',
     });
@@ -3858,15 +4436,19 @@ const notifications = {
 };
 
 const theme = {
-  current: 'twitter',
-  
+  current: 'maia',
+
   init() {
     const saved = localStorage.getItem('the_wire_theme');
     if (saved) {
       this.apply(saved);
     } else {
-      this.apply('twitter');
+      this.apply('maia');
     }
+    // Enable transitions only after initial theme is applied
+    requestAnimationFrame(() => {
+      document.body.classList.add('theme-loaded');
+    });
   },
   
   apply(themeName) {
@@ -3915,7 +4497,6 @@ const ws = {
     this.socket = new WebSocket(wsUrl);
     
     this.socket.onopen = () => {
-      console.log('WebSocket connected');
       this.reconnectAttempts = 0;
       
       this.heartbeatInterval = setInterval(() => {
@@ -3938,7 +4519,6 @@ const ws = {
     };
     
     this.socket.onclose = () => {
-      console.log('WebSocket disconnected');
       if (this.heartbeatInterval) {
         clearInterval(this.heartbeatInterval);
       }
@@ -3977,7 +4557,12 @@ const ws = {
       this.listeners[eventType] = this.listeners[eventType].filter(cb => cb !== callback);
     }
   },
-};`;
+};
+
+function linkifyMentions(text) {
+  if (!text) return '';
+  return text.replace(/@([a-zA-Z0-9_]{1,15})/g, '<a href="/u/$1" class="mention" onclick="event.stopPropagation()">@$1</a>');
+}`;
   return new Response(js, {
     headers: { 'Content-Type': 'application/javascript' },
   });
@@ -4027,20 +4612,8 @@ export { PostDO } from './durable-objects/PostDO';
 export { FeedDO } from './durable-objects/FeedDO';
 export { WebSocketDO } from './durable-objects/WebSocketDO';
 
-// Export for Cloudflare Workers
-export default app;
-
-// Scheduled handler for cron triggers
-export async function scheduled(
-  event: ScheduledEvent,
-  env: Env,
-  ctx: ExecutionContext
-): Promise<void> {
-  await handleScheduled(event, env, ctx);
-}
-
-// Queue consumer for fan-out processing
-export async function queue(
+// Queue consumer handler for fan-out processing
+async function queueHandler(
   batch: MessageBatch<import('./types/feed').FanOutMessage>,
   env: Env,
   _ctx: ExecutionContext
@@ -4080,7 +4653,7 @@ export async function queue(
         for (const followerId of followersData.followers) {
           const feedId = env.FEED_DO.idFromName(followerId);
           const feedStub = env.FEED_DO.get(feedId);
-          
+
           await feedStub.fetch('https://do.internal/add-entry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4093,12 +4666,12 @@ export async function queue(
               },
             }),
           });
-          
+
           // Broadcast new post to follower's WebSocket connections
           if (postMetadata) {
             const wsDoId = env.WEBSOCKET_DO.idFromName(followerId);
             const wsStub = env.WEBSOCKET_DO.get(wsDoId);
-            
+
             await wsStub.fetch('https://do.internal/broadcast-post', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -4125,7 +4698,7 @@ export async function queue(
         for (const followerId of followersData.followers) {
           const feedId = env.FEED_DO.idFromName(followerId);
           const feedStub = env.FEED_DO.get(feedId);
-          
+
           await feedStub.fetch('https://do.internal/remove-entry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4142,3 +4715,19 @@ export async function queue(
     }
   }
 }
+
+// Scheduled handler for cron triggers
+async function scheduledHandler(
+  event: ScheduledEvent,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> {
+  await handleScheduled(event, env, ctx);
+}
+
+// Export for Cloudflare Workers - all handlers in one object
+export default {
+  fetch: app.fetch,
+  queue: queueHandler,
+  scheduled: scheduledHandler,
+};

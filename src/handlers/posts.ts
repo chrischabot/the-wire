@@ -77,6 +77,8 @@ posts.post('/', requireAuth, async (c) => {
     authorAvatarUrl: profile.avatarUrl || '',
     content: post.content,
     mediaUrls: post.mediaUrls,
+    ...(body.replyToId && { replyToId: body.replyToId }),
+    ...(body.quoteOfId && { quoteOfId: body.quoteOfId }),
     createdAt: now,
     likeCount: 0,
     replyCount: 0,
@@ -150,22 +152,30 @@ posts.get('/:id', optionalAuth, async (c) => {
   const cached = await c.env.POSTS_KV.get(`post:${postId}`);
   if (cached) {
     const metadata: PostMetadata = JSON.parse(cached);
-    
-    // If user is authenticated, check if they liked it
+
+    // If user is authenticated, check if they liked/reposted it
     let hasLiked = false;
+    let hasReposted = false;
     if (userId) {
-      const doId = c.env.POST_DO.idFromName(postId);
-      const stub = c.env.POST_DO.get(doId);
-      const likedResponse = await stub.fetch(
-        `https://do.internal/has-liked?userId=${userId}`
-      );
-      const likedData = await likedResponse.json() as { hasLiked: boolean };
-      hasLiked = likedData.hasLiked;
+      try {
+        const doId = c.env.POST_DO.idFromName(postId);
+        const stub = c.env.POST_DO.get(doId);
+        const [likedResponse, repostedResponse] = await Promise.all([
+          stub.fetch(`https://do.internal/has-liked?userId=${userId}`),
+          stub.fetch(`https://do.internal/has-reposted?userId=${userId}`),
+        ]);
+        const likedData = await likedResponse.json() as { hasLiked: boolean };
+        const repostedData = await repostedResponse.json() as { hasReposted: boolean };
+        hasLiked = likedData.hasLiked;
+        hasReposted = repostedData.hasReposted;
+      } catch (err) {
+        console.error('Error checking liked/reposted status:', err);
+      }
     }
 
     return c.json({
       success: true,
-      data: { ...metadata, hasLiked },
+      data: { ...metadata, hasLiked, hasReposted },
     });
   }
 
@@ -203,7 +213,7 @@ posts.get('/:id/thread', optionalAuth, async (c) => {
   }
 
   // Get parent posts if this is a reply (build ancestor chain)
-  const ancestors: any[] = [];
+  const ancestors: PostMetadata[] = [];
   let currentReplyTo = mainPost.replyToId;
   
   while (currentReplyTo && ancestors.length < LIMITS.MAX_THREAD_DEPTH) {
@@ -216,7 +226,7 @@ posts.get('/:id/thread', optionalAuth, async (c) => {
   }
 
   // Get replies to this post
-  const replies: any[] = [];
+  const replies: PostMetadata[] = [];
   let cursor: string | undefined;
 
   // Search for replies (in production, use a secondary index)
@@ -347,21 +357,26 @@ posts.post('/:id/like', requireAuth, async (c) => {
 
     const { likeCount } = await response.json() as { likeCount: number };
 
-    // Update KV cache
+    // Update KV cache and create notification
     const cached = await c.env.POSTS_KV.get(`post:${postId}`);
+
     if (cached) {
       const metadata: PostMetadata = JSON.parse(cached);
       metadata.likeCount = likeCount;
       await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(metadata));
-      
-      // Create like notification for post author
+
+      // Create like notification for post author (not self)
       if (metadata.authorId !== userId) {
-        await createNotification(c.env, {
-          userId: metadata.authorId,
-          type: 'like',
-          actorId: userId,
-          postId,
-        });
+        try {
+          await createNotification(c.env, {
+            userId: metadata.authorId,
+            type: 'like',
+            actorId: userId,
+            postId,
+          });
+        } catch (notifError) {
+          console.error('Failed to create like notification:', notifError);
+        }
       }
     }
 

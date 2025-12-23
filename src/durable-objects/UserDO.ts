@@ -5,6 +5,7 @@
 
 import type { Env } from '../types/env';
 import type { UserProfile, UserSettings } from '../types/user';
+import { PLACEHOLDERS } from '../constants';
 
 interface UserState {
   profile: UserProfile;
@@ -66,7 +67,11 @@ export class UserDO implements DurableObject {
    */
   async getProfile(): Promise<UserProfile> {
     const state = await this.ensureState();
-    return state.profile;
+    return {
+      ...state.profile,
+      avatarUrl: state.profile.avatarUrl || PLACEHOLDERS.AVATAR,
+      bannerUrl: state.profile.bannerUrl || PLACEHOLDERS.BANNER,
+    };
   }
 
   /**
@@ -76,11 +81,15 @@ export class UserDO implements DurableObject {
     const state = await this.ensureState();
     state.profile = { ...state.profile, ...updates };
     await this.saveState();
-    
+
     const cacheKey = `profile:${state.profile.handle}`;
     await this.env.USERS_KV.delete(cacheKey);
-    
-    return state.profile;
+
+    return {
+      ...state.profile,
+      avatarUrl: state.profile.avatarUrl || PLACEHOLDERS.AVATAR,
+      bannerUrl: state.profile.bannerUrl || PLACEHOLDERS.BANNER,
+    };
   }
 
   /**
@@ -115,9 +124,16 @@ export class UserDO implements DurableObject {
 
   /**
    * Unfollow a user
+   * Note: Users cannot unfollow themselves (enforced at API level and here as safeguard)
    */
   async unfollow(userId: string): Promise<void> {
     const state = await this.ensureState();
+
+    // Prevent unfollowing yourself
+    if (userId === state.profile.id) {
+      return;
+    }
+
     const index = state.following.indexOf(userId);
     if (index > -1) {
       state.following.splice(index, 1);
@@ -140,9 +156,16 @@ export class UserDO implements DurableObject {
 
   /**
    * Remove a follower
+   * Note: Users cannot remove themselves as a follower (they always follow themselves)
    */
   async removeFollower(userId: string): Promise<void> {
     const state = await this.ensureState();
+
+    // Prevent removing yourself as a follower
+    if (userId === state.profile.id) {
+      return;
+    }
+
     const index = state.followers.indexOf(userId);
     if (index > -1) {
       state.followers.splice(index, 1);
@@ -153,13 +176,20 @@ export class UserDO implements DurableObject {
 
   /**
    * Block a user
+   * Note: Users cannot block themselves
    */
   async block(userId: string): Promise<void> {
     const state = await this.ensureState();
+
+    // Prevent blocking yourself
+    if (userId === state.profile.id) {
+      return;
+    }
+
     if (!state.blocked.includes(userId)) {
       state.blocked.push(userId);
       await this.saveState();
-      
+
       await this.unfollow(userId);
       await this.removeFollower(userId);
     }

@@ -3,17 +3,19 @@
  * Admin-only actions for user bans and post takedowns
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { Env } from '../types/env';
 import { requireAuth } from '../middleware/auth';
 import { normalizeHandle } from '../utils/validation';
+
+type HonoContext = Context<{ Bindings: Env }>;
 
 const moderation = new Hono<{ Bindings: Env }>();
 
 /**
  * Middleware to require admin role
  */
-async function requireAdmin(c: any, next: () => Promise<void>): Promise<Response | void> {
+async function requireAdmin(c: HonoContext, next: () => Promise<void>): Promise<Response | void> {
   const userId = c.get('userId');
   
   if (!userId) {

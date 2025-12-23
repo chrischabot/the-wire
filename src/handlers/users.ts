@@ -5,59 +5,23 @@
 import { Hono } from 'hono';
 import type { Env } from '../types/env';
 import type { UserProfile, UserSettings } from '../types/user';
+import type { PostMetadata } from '../types/post';
 import {
   validateDisplayName,
   validateBio,
   sanitizeString,
   normalizeHandle,
 } from '../utils/validation';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, optionalAuth } from '../middleware/auth';
 import { LIMITS, BATCH_SIZE, CACHE_TTL } from '../constants';
 import { createNotification } from '../services/notifications';
 
 const users = new Hono<{ Bindings: Env }>();
 
-/**
- * Get user profile by handle
- * Cached in KV for fast global reads
- */
-users.get('/:handle', async (c) => {
-  const handle = normalizeHandle(c.req.param('handle'));
-
-  // Try KV cache first
-  const cacheKey = `profile:${handle}`;
-  const cached = await c.env.USERS_KV.get(cacheKey);
-  
-  if (cached) {
-    const profile: UserProfile = JSON.parse(cached);
-    return c.json({ success: true, data: profile });
-  }
-
-  // Get user ID by handle
-  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
-  if (!userId) {
-    return c.json({ success: false, error: 'User not found' }, 404);
-  }
-
-  // Get profile from UserDO
-  const doId = c.env.USER_DO.idFromName(userId);
-  const stub = c.env.USER_DO.get(doId);
-  
-  try {
-    const response = await stub.fetch('https://do.internal/profile');
-    const profile: UserProfile = await response.json();
-    
-    // Cache in KV (1 hour TTL)
-    await c.env.USERS_KV.put(cacheKey, JSON.stringify(profile), {
-      expirationTtl: CACHE_TTL.PROFILE,
-    });
-    
-    return c.json({ success: true, data: profile });
-  } catch (error) {
-    console.error('Error fetching profile from DO:', error);
-    return c.json({ success: false, error: 'Error fetching profile' }, 500);
-  }
-});
+// =====================================================
+// IMPORTANT: All /me/* routes MUST come before /:handle
+// routes to prevent "me" being matched as a handle param
+// =====================================================
 
 /**
  * Update own profile
@@ -116,7 +80,7 @@ users.put('/me', requireAuth, async (c) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
     });
-    
+
     if (!response.ok) {
       return c.json({ success: false, error: 'Error updating profile' }, 500);
     }
@@ -170,7 +134,7 @@ users.put('/me/settings', requireAuth, async (c) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
     });
-    
+
     if (!response.ok) {
       return c.json({ success: false, error: 'Error updating settings' }, 500);
     }
@@ -180,6 +144,82 @@ users.put('/me/settings', requireAuth, async (c) => {
   } catch (error) {
     console.error('Error updating settings:', error);
     return c.json({ success: false, error: 'Error updating settings' }, 500);
+  }
+});
+
+/**
+ * GET /api/users/me/blocked - Get blocked users list
+ */
+users.get('/me/blocked', requireAuth, async (c) => {
+  const userId = c.get('userId');
+
+  const doId = c.env.USER_DO.idFromName(userId);
+  const stub = c.env.USER_DO.get(doId);
+  const blockedResp = await stub.fetch('https://do.internal/blocked');
+  const data = await blockedResp.json() as { blocked: string[] };
+
+  const blocked = await Promise.all(
+    data.blocked.map(async (blockedId: string) => {
+      const blockedData = await c.env.USERS_KV.get(`user:${blockedId}`);
+      if (blockedData) {
+        const authUser: import('../types/user').AuthUser = JSON.parse(blockedData);
+        return { id: blockedId, handle: authUser.handle };
+      }
+      return null;
+    })
+  );
+
+  const validBlocked = blocked.filter((b): b is { id: string; handle: string } => b !== null);
+
+  return c.json({
+    success: true,
+    data: { blocked: validBlocked, count: validBlocked.length },
+  });
+});
+
+// =====================================================
+// /:handle routes - These MUST come after /me routes
+// =====================================================
+
+/**
+ * Get user profile by handle
+ * Cached in KV for fast global reads
+ */
+users.get('/:handle', async (c) => {
+  const handle = normalizeHandle(c.req.param('handle'));
+
+  // Try KV cache first
+  const cacheKey = `profile:${handle}`;
+  const cached = await c.env.USERS_KV.get(cacheKey);
+  
+  if (cached) {
+    const profile: UserProfile = JSON.parse(cached);
+    return c.json({ success: true, data: profile });
+  }
+
+  // Get user ID by handle
+  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+  if (!userId) {
+    return c.json({ success: false, error: 'User not found' }, 404);
+  }
+
+  // Get profile from UserDO
+  const doId = c.env.USER_DO.idFromName(userId);
+  const stub = c.env.USER_DO.get(doId);
+  
+  try {
+    const response = await stub.fetch('https://do.internal/profile');
+    const profile: UserProfile = await response.json();
+    
+    // Cache in KV (1 hour TTL)
+    await c.env.USERS_KV.put(cacheKey, JSON.stringify(profile), {
+      expirationTtl: CACHE_TTL.PROFILE,
+    });
+    
+    return c.json({ success: true, data: profile });
+  } catch (error) {
+    console.error('Error fetching profile from DO:', error);
+    return c.json({ success: false, error: 'Error fetching profile' }, 500);
   }
 });
 
@@ -243,6 +283,11 @@ users.delete('/:handle/follow', requireAuth, async (c) => {
   const targetUserId = await c.env.USERS_KV.get(`handle:${targetHandle}`);
   if (!targetUserId) {
     return c.json({ success: false, error: 'User not found' }, 404);
+  }
+
+  // Users cannot unfollow themselves (they always follow themselves)
+  if (currentUserId === targetUserId) {
+    return c.json({ success: false, error: 'Cannot unfollow yourself' }, 400);
   }
 
   const currentDoId = c.env.USER_DO.idFromName(currentUserId);
@@ -385,43 +430,14 @@ users.delete('/:handle/block', requireAuth, async (c) => {
 });
 
 /**
- * GET /api/users/me/blocked - Get blocked users list
- */
-users.get('/me/blocked', requireAuth, async (c) => {
-  const userId = c.get('userId');
-
-  const doId = c.env.USER_DO.idFromName(userId);
-  const stub = c.env.USER_DO.get(doId);
-  const blockedResp = await stub.fetch('https://do.internal/blocked');
-  const data = await blockedResp.json() as { blocked: string[] };
-
-  const blocked = await Promise.all(
-    data.blocked.map(async (blockedId: string) => {
-      const blockedData = await c.env.USERS_KV.get(`user:${blockedId}`);
-      if (blockedData) {
-        const authUser: import('../types/user').AuthUser = JSON.parse(blockedData);
-        return { id: blockedId, handle: authUser.handle };
-      }
-      return null;
-    })
-  );
-
-  const validBlocked = blocked.filter((b): b is { id: string; handle: string } => b !== null);
-
-  return c.json({
-    success: true,
-    data: { blocked: validBlocked, count: validBlocked.length },
-  });
-});
-
-/**
  * GET /api/users/:handle/posts - Get user's posts timeline
  */
-users.get('/:handle/posts', async (c) => {
+users.get('/:handle/posts', optionalAuth, async (c) => {
   const handle = normalizeHandle(c.req.param('handle'));
   const cursor = c.req.query('cursor');
   const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
   const includeReplies = c.req.query('include_replies') === 'true';
+  const currentUserId = c.get('userId');
 
   // Get user ID by handle
   const userId = await c.env.USERS_KV.get(`handle:${handle}`);
@@ -430,11 +446,16 @@ users.get('/:handle/posts', async (c) => {
   }
 
   // List all posts and filter by author
-  // In production, you'd want a secondary index for this
-  let postCursor: string | undefined = cursor ? atob(cursor) : undefined;
-  const posts: any[] = [];
-  
-  // Paginate through posts
+  let postCursor: string | undefined;
+  if (cursor) {
+    try {
+      postCursor = atob(cursor);
+    } catch {
+      postCursor = undefined;
+    }
+  }
+  const posts: PostMetadata[] = [];
+
   while (posts.length < limit) {
     const listResult = await c.env.POSTS_KV.list({
       prefix: 'post:',
@@ -444,13 +465,12 @@ users.get('/:handle/posts', async (c) => {
 
     for (const key of listResult.keys) {
       if (posts.length >= limit) break;
-      
+
       const postData = await c.env.POSTS_KV.get(key.name);
       if (!postData) continue;
-      
+
       const post = JSON.parse(postData);
-      
-      // Filter by author and optionally exclude replies
+
       if (post.authorId === userId && !post.isDeleted) {
         if (includeReplies || !post.replyToId) {
           posts.push(post);
@@ -462,21 +482,211 @@ users.get('/:handle/posts', async (c) => {
     postCursor = listResult.cursor;
   }
 
-  // Sort by creation time descending
   posts.sort((a, b) => b.createdAt - a.createdAt);
 
-  // Calculate next cursor
-  const nextCursor = posts.length >= limit && postCursor 
-    ? btoa(postCursor) 
+  // Add hasLiked status if user is authenticated
+  const postsWithLikeStatus = await Promise.all(
+    posts.slice(0, limit).map(async (post) => {
+      if (!currentUserId) return { ...post, hasLiked: false };
+      try {
+        const doId = c.env.POST_DO.idFromName(post.id);
+        const stub = c.env.POST_DO.get(doId);
+        const resp = await stub.fetch(`https://do.internal/has-liked?userId=${currentUserId}`);
+        const data = await resp.json() as { hasLiked: boolean };
+        return { ...post, hasLiked: data.hasLiked };
+      } catch {
+        return { ...post, hasLiked: false };
+      }
+    })
+  );
+
+  const nextCursor = posts.length >= limit && postCursor
+    ? btoa(postCursor)
     : null;
 
   return c.json({
     success: true,
     data: {
-      posts: posts.slice(0, limit),
+      posts: postsWithLikeStatus,
       cursor: nextCursor,
       hasMore: posts.length >= limit,
     },
+  });
+});
+
+/**
+ * GET /api/users/:handle/replies - Get user's replies
+ */
+users.get('/:handle/replies', optionalAuth, async (c) => {
+  const handle = normalizeHandle(c.req.param('handle'));
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
+  const currentUserId = c.get('userId');
+
+  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+  if (!userId) {
+    return c.json({ success: false, error: 'User not found' }, 404);
+  }
+
+  const posts: PostMetadata[] = [];
+  let postCursor: string | undefined;
+
+  while (posts.length < limit) {
+    const listResult = await c.env.POSTS_KV.list({
+      prefix: 'post:',
+      limit: BATCH_SIZE.KV_LIST,
+      cursor: postCursor ?? null,
+    });
+
+    for (const key of listResult.keys) {
+      if (posts.length >= limit) break;
+      const postData = await c.env.POSTS_KV.get(key.name);
+      if (!postData) continue;
+      const post = JSON.parse(postData);
+      if (post.authorId === userId && !post.isDeleted && post.replyToId) {
+        posts.push(post);
+      }
+    }
+
+    if (listResult.list_complete) break;
+    postCursor = listResult.cursor;
+  }
+
+  posts.sort((a, b) => b.createdAt - a.createdAt);
+
+  const postsWithLikeStatus = await Promise.all(
+    posts.slice(0, limit).map(async (post) => {
+      if (!currentUserId) return { ...post, hasLiked: false };
+      try {
+        const doId = c.env.POST_DO.idFromName(post.id);
+        const stub = c.env.POST_DO.get(doId);
+        const resp = await stub.fetch(`https://do.internal/has-liked?userId=${currentUserId}`);
+        const data = await resp.json() as { hasLiked: boolean };
+        return { ...post, hasLiked: data.hasLiked };
+      } catch {
+        return { ...post, hasLiked: false };
+      }
+    })
+  );
+
+  return c.json({
+    success: true,
+    data: { posts: postsWithLikeStatus },
+  });
+});
+
+/**
+ * GET /api/users/:handle/media - Get user's posts with media
+ */
+users.get('/:handle/media', optionalAuth, async (c) => {
+  const handle = normalizeHandle(c.req.param('handle'));
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
+  const currentUserId = c.get('userId');
+
+  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+  if (!userId) {
+    return c.json({ success: false, error: 'User not found' }, 404);
+  }
+
+  const posts: PostMetadata[] = [];
+  let postCursor: string | undefined;
+
+  while (posts.length < limit) {
+    const listResult = await c.env.POSTS_KV.list({
+      prefix: 'post:',
+      limit: BATCH_SIZE.KV_LIST,
+      cursor: postCursor ?? null,
+    });
+
+    for (const key of listResult.keys) {
+      if (posts.length >= limit) break;
+      const postData = await c.env.POSTS_KV.get(key.name);
+      if (!postData) continue;
+      const post = JSON.parse(postData);
+      if (post.authorId === userId && !post.isDeleted && post.mediaUrls && post.mediaUrls.length > 0) {
+        posts.push(post);
+      }
+    }
+
+    if (listResult.list_complete) break;
+    postCursor = listResult.cursor;
+  }
+
+  posts.sort((a, b) => b.createdAt - a.createdAt);
+
+  const postsWithLikeStatus = await Promise.all(
+    posts.slice(0, limit).map(async (post) => {
+      if (!currentUserId) return { ...post, hasLiked: false };
+      try {
+        const doId = c.env.POST_DO.idFromName(post.id);
+        const stub = c.env.POST_DO.get(doId);
+        const resp = await stub.fetch(`https://do.internal/has-liked?userId=${currentUserId}`);
+        const data = await resp.json() as { hasLiked: boolean };
+        return { ...post, hasLiked: data.hasLiked };
+      } catch {
+        return { ...post, hasLiked: false };
+      }
+    })
+  );
+
+  return c.json({
+    success: true,
+    data: { posts: postsWithLikeStatus },
+  });
+});
+
+/**
+ * GET /api/users/:handle/likes - Get posts the user has liked
+ */
+users.get('/:handle/likes', async (c) => {
+  const handle = normalizeHandle(c.req.param('handle'));
+  const limit = Math.min(parseInt(c.req.query('limit') || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10), LIMITS.MAX_PAGINATION_LIMIT);
+
+  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+  if (!userId) {
+    return c.json({ success: false, error: 'User not found' }, 404);
+  }
+
+  const posts: PostMetadata[] = [];
+  let postCursor: string | undefined;
+
+  while (posts.length < limit) {
+    const listResult = await c.env.POSTS_KV.list({
+      prefix: 'post:',
+      limit: BATCH_SIZE.KV_LIST,
+      cursor: postCursor ?? null,
+    });
+
+    for (const key of listResult.keys) {
+      if (posts.length >= limit) break;
+      const postData = await c.env.POSTS_KV.get(key.name);
+      if (!postData) continue;
+      const post = JSON.parse(postData);
+
+      if (post.isDeleted) continue;
+
+      try {
+        const doId = c.env.POST_DO.idFromName(post.id);
+        const stub = c.env.POST_DO.get(doId);
+        const likedResp = await stub.fetch(`https://do.internal/has-liked?userId=${userId}`);
+        const likedData = await likedResp.json() as { hasLiked: boolean };
+        if (likedData.hasLiked) {
+          // All posts in likes tab are liked by definition
+          posts.push({ ...post, hasLiked: true });
+        }
+      } catch {
+        // Skip on error
+      }
+    }
+
+    if (listResult.list_complete) break;
+    postCursor = listResult.cursor;
+  }
+
+  posts.sort((a, b) => b.createdAt - a.createdAt);
+
+  return c.json({
+    success: true,
+    data: { posts: posts.slice(0, limit) },
   });
 });
 

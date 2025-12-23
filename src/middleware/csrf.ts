@@ -4,7 +4,12 @@
  */
 
 import { createMiddleware } from 'hono/factory';
+import type { Context } from 'hono';
 import type { Env } from '../types/env';
+import { verifyToken } from '../utils/jwt';
+import { getJwtSecret } from './auth';
+
+type HonoContext = Context<{ Bindings: Env }>;
 
 /**
  * List of allowed origins
@@ -34,7 +39,7 @@ const EXEMPT_PATHS = [
 /**
  * Extract origin from request
  */
-function getOrigin(c: any): string | null {
+function getOrigin(c: HonoContext): string | null {
   return c.req.header('Origin') || null;
 }
 
@@ -118,12 +123,22 @@ export function csrfProtection(options: {
         }
       }
 
-      // For API requests without Origin/Referer, check for valid auth token
+      // For API requests without Origin/Referer, verify the auth token
       // This allows legitimate API clients while blocking browser-based attacks
       const authHeader = c.req.header('Authorization');
       if (authHeader?.startsWith('Bearer ')) {
-        await next();
-        return;
+        const token = authHeader.substring(7);
+        try {
+          const secret = getJwtSecret(c.env);
+          const payload = await verifyToken(token, secret);
+          if (payload) {
+            // Valid token - allow the request
+            await next();
+            return;
+          }
+        } catch {
+          // Invalid token - fall through to rejection
+        }
       }
 
       // Reject request if no valid authentication
@@ -138,7 +153,6 @@ export function csrfProtection(options: {
 
     // Validate origin
     if (!isOriginAllowed(origin, allowedOrigins, c.env)) {
-      console.warn(`CSRF: Blocked request from origin ${origin}`);
       return c.json(
         {
           success: false,
