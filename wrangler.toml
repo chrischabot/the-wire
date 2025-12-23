@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
+[observability]
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
 # Development settings
 [dev]
 port = 8080
@@ -11,22 +18,22 @@ local_protocol = "http"
 # KV Namespaces
 [[kv_namespaces]]
 binding = "USERS_KV"
-id = "users-kv-id"
+#id = "users-kv-id"
 preview_id = "users-kv-preview-id"
 
 [[kv_namespaces]]
 binding = "POSTS_KV"
-id = "posts-kv-id"
+#id = "posts-kv-id"
 preview_id = "posts-kv-preview-id"
 
 [[kv_namespaces]]
 binding = "SESSIONS_KV"
-id = "sessions-kv-id"
+#id = "sessions-kv-id"
 preview_id = "sessions-kv-preview-id"
 
 [[kv_namespaces]]
 binding = "FEEDS_KV"
-id = "feeds-kv-id"
+#id = "feeds-kv-id"
 preview_id = "feeds-kv-preview-id"
 
 # R2 Buckets

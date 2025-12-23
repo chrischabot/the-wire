@@ -315,6 +315,26 @@ export class UserDO implements DurableObject {
   }
 
   /**
+   * Structured logging helper for Durable Objects
+   */
+  private log(level: string, message: string, context?: Record<string, unknown>, error?: Error) {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      context: { durableObject: 'UserDO', ...context },
+      ...(error && { error: { name: error.name, message: error.message, stack: error.stack } }),
+    };
+    if (level === 'error') {
+      console.error(JSON.stringify(entry));
+    } else if (level === 'warn') {
+      console.warn(JSON.stringify(entry));
+    } else {
+      console.log(JSON.stringify(entry));
+    }
+  }
+
+  /**
    * Handle HTTP fetch requests
    */
   async fetch(request: Request): Promise<Response> {
@@ -322,11 +342,16 @@ export class UserDO implements DurableObject {
     const path = url.pathname;
     const method = request.method;
 
+    this.log('debug', 'UserDO request received', { path, method });
+
     try {
       // Initialize
       if (path === '/initialize' && method === 'POST') {
+        this.log('info', 'Initializing user');
         const body = await request.json() as { profile: UserProfile; settings: UserSettings };
+        this.log('debug', 'Initialize payload received', { handle: body.profile.handle, userId: body.profile.id });
         await this.initialize(body.profile, body.settings);
+        this.log('info', 'User initialized successfully', { userId: body.profile.id });
         return new Response(JSON.stringify({ success: true }), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -520,10 +545,12 @@ export class UserDO implements DurableObject {
         });
       }
 
+      this.log('warn', 'UserDO route not found', { path, method });
       return new Response('Not found', { status: 404 });
     } catch (error) {
-      console.error('UserDO fetch error:', error);
-      return new Response(JSON.stringify({ error: 'Internal error' }), {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.log('error', 'UserDO fetch error', { path, method }, err);
+      return new Response(JSON.stringify({ error: 'Internal error', details: err.message }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });

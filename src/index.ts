@@ -4600,9 +4600,25 @@ app.notFound((c) => {
   `, 404);
 });
 
-// Error handler
+// Error handler with structured logging
 app.onError((err, c) => {
-  console.error('Unhandled error:', err);
+  // Inline structured error logging for production debugging
+  const errorLog = {
+    timestamp: new Date().toISOString(),
+    level: 'error',
+    message: 'Unhandled request error',
+    error: {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+    },
+    context: {
+      path: c.req.path,
+      method: c.req.method,
+      url: c.req.url,
+    },
+  };
+  console.error(JSON.stringify(errorLog));
   return c.json({ success: false, error: 'Internal server error' }, 500);
 });
 
