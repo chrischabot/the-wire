@@ -18,23 +18,23 @@ local_protocol = "http"
 # KV Namespaces
 [[kv_namespaces]]
 binding = "USERS_KV"
-#id = "users-kv-id"
-preview_id = "users-kv-preview-id"
+id = "689e9c3536ea4b319458c41783fb9815"
+preview_id = "689e9c3536ea4b319458c41783fb9815"
 
 [[kv_namespaces]]
 binding = "POSTS_KV"
-#id = "posts-kv-id"
-preview_id = "posts-kv-preview-id"
+id = "9a6aeadbafcf41fc95e25adc0c09bfe8"
+preview_id = "9a6aeadbafcf41fc95e25adc0c09bfe8"
 
 [[kv_namespaces]]
 binding = "SESSIONS_KV"
-#id = "sessions-kv-id"
-preview_id = "sessions-kv-preview-id"
+id = "2d2953c5d5114a198e19bd56277cc089"
+preview_id = "2d2953c5d5114a198e19bd56277cc089"
 
 [[kv_namespaces]]
 binding = "FEEDS_KV"
-#id = "feeds-kv-id"
-preview_id = "feeds-kv-preview-id"
+id = "d34b5ede0bd14ee3b06156ef5a11dd19"
+preview_id = "d34b5ede0bd14ee3b06156ef5a11dd19"
 
 # R2 Buckets
 [[r2_buckets]]

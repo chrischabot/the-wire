@@ -36,7 +36,9 @@ app.use('/api/*', bodyLimit({
 }));
 
 // CSRF protection for state-changing requests
-app.use('*', csrfProtection());
+app.use('*', csrfProtection({
+  exemptPaths: ['/api/auth/login', '/api/auth/signup', '/health', '/debug/']
+}));
 
 // General API rate limiting (100 req/min per IP)
 app.use('/api/*', rateLimit({ ...RATE_LIMITS.api, perUser: false }));
@@ -50,6 +52,63 @@ app.get('/health', (c) => {
       service: 'the-wire',
       timestamp: new Date().toISOString(),
       environment: c.env.ENVIRONMENT,
+    },
+  });
+});
+
+// Debug endpoint to check KV bindings (REMOVE IN PRODUCTION)
+app.get('/debug/kv', async (c) => {
+  const email = c.req.query('email') || 'chabotc@gmail.com';
+  const handle = c.req.query('handle') || 'chabotc';
+
+  const emailKey = `email:${email.toLowerCase()}`;
+  const handleKey = `handle:${handle.toLowerCase()}`;
+
+  const emailValue = await c.env.USERS_KV.get(emailKey);
+  const handleValue = await c.env.USERS_KV.get(handleKey);
+
+  // List first 10 keys
+  const list = await c.env.USERS_KV.list({ limit: 10 });
+
+  return c.json({
+    emailKey,
+    emailValue,
+    handleKey,
+    handleValue,
+    allKeys: list.keys.map(k => k.name),
+  });
+});
+
+// Debug endpoint to reset all data (REMOVE IN PRODUCTION)
+app.post('/debug/reset', async (c) => {
+  // Clear all KV namespaces
+  const clearKV = async (kv: KVNamespace, name: string) => {
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const list = await kv.list({ cursor, limit: 1000 });
+      keys.push(...list.keys.map(k => k.name));
+      cursor = list.list_complete ? undefined : list.cursor;
+    } while (cursor);
+
+    for (const key of keys) {
+      await kv.delete(key);
+    }
+    return keys.length;
+  };
+
+  const usersDeleted = await clearKV(c.env.USERS_KV, 'USERS_KV');
+  const postsDeleted = await clearKV(c.env.POSTS_KV, 'POSTS_KV');
+  const sessionsDeleted = await clearKV(c.env.SESSIONS_KV, 'SESSIONS_KV');
+  const feedsDeleted = await clearKV(c.env.FEEDS_KV, 'FEEDS_KV');
+
+  return c.json({
+    success: true,
+    deleted: {
+      users: usersDeleted,
+      posts: postsDeleted,
+      sessions: sessionsDeleted,
+      feeds: feedsDeleted,
     },
   });
 });
