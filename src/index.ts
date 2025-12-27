@@ -7765,28 +7765,55 @@ small {
 
 @media (max-width: 768px) {
   .sidebar-left {
-    width: 88px;
-  }
-  
-  .nav-item span:not(.nav-icon) {
     display: none;
   }
   
-  .nav-item svg {
-    margin-right: 0;
+  .twitter-layout {
+    padding-bottom: 60px;
+  }
+}
+
+.bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .bottom-nav {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 53px;
+    background: var(--background);
+    border-top: 1px solid var(--border);
+    z-index: 100;
+    padding-bottom: env(safe-area-inset-bottom);
   }
   
-  .post-button {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    padding: 0;
-    font-size: 0;
+  .bottom-nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    color: var(--foreground);
+    text-decoration: none;
+    flex: 1;
+    height: 100%;
   }
   
-  .post-button::before {
-    content: '+';
-    font-size: 24px;
+  .bottom-nav-item svg {
+    width: 26px;
+    height: 26px;
+  }
+  
+  .bottom-nav .nav-icon-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 
