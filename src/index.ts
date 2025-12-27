@@ -3,72 +3,82 @@
  * A globally distributed social network on Cloudflare edge
  */
 
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { bodyLimit } from 'hono/body-limit';
-import type { Env } from './types/env';
-import authRoutes from './handlers/auth';
-import usersRoutes from './handlers/users';
-import postsRoutes from './handlers/posts';
-import mediaRoutes from './handlers/media';
-import feedRoutes from './handlers/feed';
-import moderationRoutes from './handlers/moderation';
-import adminRoutes from './handlers/admin';
-import notificationsRoutes from './handlers/notifications';
-import searchRoutes from './handlers/search';
-import seedRoutes from './handlers/seed';
-import unfurlRoutes from './handlers/unfurl';
-import { rateLimit, RATE_LIMITS } from './middleware/rate-limit';
-import { csrfProtection } from './middleware/csrf';
-import { handleScheduled } from './handlers/scheduled';
-import { getCompletePostScript } from './shared/post-renderer';
-import { getSidebarHtml } from './shared/sidebar-renderer';
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
+import type { Env } from "./types/env";
+import authRoutes from "./handlers/auth";
+import usersRoutes from "./handlers/users";
+import postsRoutes from "./handlers/posts";
+import mediaRoutes from "./handlers/media";
+import feedRoutes from "./handlers/feed";
+import moderationRoutes from "./handlers/moderation";
+import adminRoutes from "./handlers/admin";
+import notificationsRoutes from "./handlers/notifications";
+import searchRoutes from "./handlers/search";
+import seedRoutes from "./handlers/seed";
+import unfurlRoutes from "./handlers/unfurl";
+import { rateLimit, RATE_LIMITS } from "./middleware/rate-limit";
+import { csrfProtection } from "./middleware/csrf";
+import { handleScheduled } from "./handlers/scheduled";
+import { getCompletePostScript } from "./shared/post-renderer";
+import { getSidebarHtml } from "./shared/sidebar-renderer";
+import { getBottomNavHtml } from "./shared/bottom-nav";
 
 // Create Hono app with environment typing
 const app = new Hono<{ Bindings: Env }>();
 
 // Global middleware
-app.use('*', cors());
+app.use("*", cors());
 
 // Request body size limit (1MB for JSON, handled separately for multipart)
-app.use('/api/*', bodyLimit({
-  maxSize: 1024 * 1024, // 1MB
-  onError: (c) => {
-    return c.json({
-      success: false,
-      error: 'Request body too large',
-    }, 413);
-  },
-}));
+app.use(
+  "/api/*",
+  bodyLimit({
+    maxSize: 1024 * 1024, // 1MB
+    onError: (c) => {
+      return c.json(
+        {
+          success: false,
+          error: "Request body too large",
+        },
+        413,
+      );
+    },
+  }),
+);
 
 // CSRF protection for state-changing requests
-app.use('*', csrfProtection({
-  allowedOrigins: [
-    'http://localhost:8787',
-    'http://localhost:8080',
-    'http://127.0.0.1:8787',
-    'http://127.0.0.1:8080',
-    'https://the-wire.chabotc.workers.dev',
-  ],
-  exemptPaths: [
-    '/api/auth/login',
-    '/api/auth/signup',
-    '/health',
-    '/debug/reset', // For testing database reset
-    '/debug/bootstrap-admin', // For bootstrapping first admin
-  ]
-}));
+app.use(
+  "*",
+  csrfProtection({
+    allowedOrigins: [
+      "http://localhost:8787",
+      "http://localhost:8080",
+      "http://127.0.0.1:8787",
+      "http://127.0.0.1:8080",
+      "https://the-wire.chabotc.workers.dev",
+    ],
+    exemptPaths: [
+      "/api/auth/login",
+      "/api/auth/signup",
+      "/health",
+      "/debug/reset", // For testing database reset
+      "/debug/bootstrap-admin", // For bootstrapping first admin
+    ],
+  }),
+);
 
 // General API rate limiting (100 req/min per IP)
-app.use('/api/*', rateLimit({ ...RATE_LIMITS.api, perUser: false }));
+app.use("/api/*", rateLimit({ ...RATE_LIMITS.api, perUser: false }));
 
 // Health check endpoint
-app.get('/health', (c) => {
+app.get("/health", (c) => {
   return c.json({
     success: true,
     data: {
-      status: 'healthy',
-      service: 'the-wire',
+      status: "healthy",
+      service: "the-wire",
       timestamp: new Date().toISOString(),
       environment: c.env.ENVIRONMENT,
     },
@@ -76,7 +86,7 @@ app.get('/health', (c) => {
 });
 
 // Landing page
-app.get('/', (c) => {
+app.get("/", (c) => {
   const landingPage = `
 <!DOCTYPE html>
 <html lang="en">
@@ -213,6 +223,21 @@ app.get('/', (c) => {
   </div>
 
   <script src="/js/api.js?v=9"></script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `;
@@ -220,7 +245,7 @@ app.get('/', (c) => {
 });
 
 // Signup page
-app.get('/signup', (c) => {
+app.get("/signup", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -328,13 +353,28 @@ app.get('/signup', (c) => {
       }
     });
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Login page
-app.get('/login', (c) => {
+app.get("/login", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -421,13 +461,28 @@ app.get('/login', (c) => {
       }
     });
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Home page
-app.get('/home', (c) => {
+app.get("/home", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -440,7 +495,7 @@ app.get('/home', (c) => {
 </head>
 <body>
   <div class="twitter-layout">
-    ${getSidebarHtml({ activePage: 'home' })}
+    ${getSidebarHtml({ activePage: "home" })}
 
     <!-- Main Content -->
     <div class="main-content">
@@ -492,6 +547,7 @@ app.get('/home', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -510,7 +566,7 @@ app.get('/home', (c) => {
       try {
         const response = await auth.me();
         if (response.success) {
-          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+          document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + response.data.handle);
         }
       } catch (error) {
         console.error('Error getting profile:', error);
@@ -1362,13 +1418,28 @@ app.get('/home', (c) => {
     loadTimeline();
     loadUserProfile();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Search results page
-app.get('/search', (c) => {
+app.get("/search", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -1444,6 +1515,7 @@ app.get('/search', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="widget-box">
@@ -1477,7 +1549,7 @@ app.get('/search', (c) => {
           const response = await auth.me();
           if (response.success) {
             currentUser = response.data;
-            document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+            document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + response.data.handle);
             postConfig.currentUserHandle = currentUser.handle;
             postConfig.currentUserId = currentUser.id;
           }
@@ -1497,7 +1569,7 @@ app.get('/search', (c) => {
     initPage();
 
     ${getCompletePostScript({
-      containerId: 'search-results',
+      containerId: "search-results",
       showDropdownMenu: true,
       showInteractiveActions: true,
       enableLinkCards: true,
@@ -1643,13 +1715,28 @@ app.get('/search', (c) => {
       }
     }
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Explore page
-app.get('/explore', (c) => {
+app.get("/explore", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -1709,6 +1796,7 @@ app.get('/explore', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -1728,7 +1816,7 @@ app.get('/explore', (c) => {
           const response = await auth.me();
           if (response.success) {
             currentUser = response.data;
-            document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+            document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + response.data.handle);
             // Update post config with current user
             postConfig.currentUserHandle = currentUser.handle;
             postConfig.currentUserId = currentUser.id;
@@ -1741,7 +1829,7 @@ app.get('/explore', (c) => {
     }
 
     ${getCompletePostScript({
-      containerId: 'explore-content',
+      containerId: "explore-content",
       showDropdownMenu: true,
       showInteractiveActions: true,
       enableLinkCards: true,
@@ -1816,13 +1904,28 @@ app.get('/explore', (c) => {
 
     initPage();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Notifications page
-app.get('/notifications', (c) => {
+app.get("/notifications", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -1879,6 +1982,7 @@ app.get('/notifications', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -1897,7 +2001,7 @@ app.get('/notifications', (c) => {
       try {
         const response = await auth.me();
         if (response.success) {
-          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+          document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + response.data.handle);
         }
       } catch (error) {
         console.error('Error getting profile:', error);
@@ -2000,14 +2104,29 @@ app.get('/notifications', (c) => {
 
     loadNotifications();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Single post view
-app.get('/post/:id', (c) => {
-  const postId = c.req.param('id');
+app.get("/post/:id", (c) => {
+  const postId = c.req.param("id");
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -2111,6 +2230,7 @@ app.get('/post/:id', (c) => {
       <div id="replies-container"></div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -2373,6 +2493,17 @@ app.get('/post/:id', (c) => {
             document.getElementById('reply-composer').style.display = 'block';
             setupReplyComposer();
 
+            const shouldFocusReply = new URLSearchParams(window.location.search).get('reply') === 'true';
+            if (shouldFocusReply) {
+              setTimeout(function() {
+                const replyTextarea = document.getElementById('reply-content');
+                if (replyTextarea) {
+                  replyTextarea.focus();
+                  replyTextarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }, 100);
+            }
+
             // Populate "Replying to" with author and mentioned users
             const replyingToEl = document.getElementById('replying-to');
             const mentionedUsers = new Set();
@@ -2403,7 +2534,7 @@ app.get('/post/:id', (c) => {
       try {
         const response = await auth.me();
         if (response.success) {
-          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+          document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + response.data.handle);
 
           const profileResp = await users.getProfile(response.data.handle);
           if (profileResp.success) {
@@ -2813,13 +2944,28 @@ app.get('/post/:id', (c) => {
     });
     loadUserProfile();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Settings page
-app.get('/settings', (c) => {
+app.get("/settings", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -2976,6 +3122,7 @@ app.get('/settings', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -2994,7 +3141,7 @@ app.get('/settings', (c) => {
       try {
         const response = await auth.me();
         if (response.success) {
-          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+          document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + response.data.handle);
         }
       } catch (error) {
         console.error('Error getting profile:', error);
@@ -3166,12 +3313,27 @@ app.get('/settings', (c) => {
 
     loadProfile();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
-app.get('/settings/muted', (c) => {
+app.get("/settings/muted", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -3264,6 +3426,7 @@ app.get('/settings/muted', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -3282,7 +3445,7 @@ app.get('/settings/muted', (c) => {
       try {
         const response = await auth.me();
         if (response.success) {
-          document.getElementById('profile-nav').href = '/u/' + response.data.handle;
+          document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + response.data.handle);
         }
       } catch (error) {
         console.error('Error getting profile:', error);
@@ -3489,13 +3652,28 @@ app.get('/settings/muted', (c) => {
 
     loadMutedWords();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Admin Dashboard
-app.get('/admin', (c) => {
+app.get("/admin", (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -3887,6 +4065,7 @@ app.get('/admin', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div style="padding: 20px;">
@@ -4332,14 +4511,29 @@ app.get('/admin', (c) => {
 
     init();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Public profile page - MUST be before API routes to avoid conflicts
-app.get('/u/:handle', (c) => {
-  const handle = c.req.param('handle');
+app.get("/u/:handle", (c) => {
+  const handle = c.req.param("handle");
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -4395,6 +4589,7 @@ app.get('/u/:handle', (c) => {
       </div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -4916,14 +5111,29 @@ app.get('/u/:handle', (c) => {
 
     loadProfile();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Followers page
-app.get('/u/:handle/followers', (c) => {
-  const handle = c.req.param('handle');
+app.get("/u/:handle/followers", (c) => {
+  const handle = c.req.param("handle");
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -4983,6 +5193,7 @@ app.get('/u/:handle/followers', (c) => {
       <div id="users-list"><div class="empty-state">Loading...</div></div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -5005,7 +5216,7 @@ app.get('/u/:handle/followers', (c) => {
         if (meResp.success) {
           currentUserId = meResp.data.id;
           currentUserHandle = meResp.data.handle;
-          document.getElementById('profile-nav').href = '/u/' + meResp.data.handle;
+          document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + meResp.data.handle);
           const followingResp = await fetch('/api/users/' + meResp.data.handle + '/following');
           const followingData = await followingResp.json();
           if (followingData.success) {
@@ -5067,14 +5278,29 @@ app.get('/u/:handle/followers', (c) => {
 
     init();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // Following page
-app.get('/u/:handle/following', (c) => {
-  const handle = c.req.param('handle');
+app.get("/u/:handle/following", (c) => {
+  const handle = c.req.param("handle");
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -5134,6 +5360,7 @@ app.get('/u/:handle/following', (c) => {
       <div id="users-list"><div class="empty-state">Loading...</div></div>
     </div>
 
+    ${getBottomNavHtml()}
     <!-- Right Sidebar -->
     <div class="sidebar-right">
       <div class="search-box">
@@ -5156,7 +5383,7 @@ app.get('/u/:handle/following', (c) => {
         if (meResp.success) {
           currentUserId = meResp.data.id;
           currentUserHandle = meResp.data.handle;
-          document.getElementById('profile-nav').href = '/u/' + meResp.data.handle;
+          document.querySelectorAll('#profile-nav, #bottom-profile-nav').forEach(el => el.href = '/u/' + meResp.data.handle);
           const followingResp = await fetch('/api/users/' + meResp.data.handle + '/following');
           const followingData = await followingResp.json();
           if (followingData.success) {
@@ -5218,26 +5445,41 @@ app.get('/u/:handle/following', (c) => {
 
     init();
   </script>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
   `);
 });
 
 // API version info
-app.get('/api', (c) => {
+app.get("/api", (c) => {
   return c.json({
     success: true,
     data: {
-      name: 'The Wire API',
-      version: '1.0.0',
+      name: "The Wire API",
+      version: "1.0.0",
       endpoints: {
-        auth: '/api/auth/*',
-        users: '/api/users/*',
-        posts: '/api/posts/*',
-        feed: '/api/feed/*',
-        media: '/api/media/*',
-        notifications: '/api/notifications/*',
-        ws: '/api/ws (WebSocket)',
+        auth: "/api/auth/*",
+        users: "/api/users/*",
+        posts: "/api/posts/*",
+        feed: "/api/feed/*",
+        media: "/api/media/*",
+        notifications: "/api/notifications/*",
+        ws: "/api/ws (WebSocket)",
       },
     },
   });
@@ -5247,89 +5489,89 @@ app.get('/api', (c) => {
  * WebSocket endpoint - Upgrade to WebSocket connection
  * Query param: token (JWT for authentication)
  */
-app.get('/api/ws', async (c) => {
-  const token = c.req.query('token');
-  
+app.get("/api/ws", async (c) => {
+  const token = c.req.query("token");
+
   if (!token) {
-    return c.json({ success: false, error: 'Token required' }, 401);
+    return c.json({ success: false, error: "Token required" }, 401);
   }
 
   // Verify JWT
-  const { verifyToken } = await import('./utils/jwt');
-  const { getJwtSecret } = await import('./middleware/auth');
-  
+  const { verifyToken } = await import("./utils/jwt");
+  const { getJwtSecret } = await import("./middleware/auth");
+
   try {
     const secret = getJwtSecret(c.env);
     const payload = await verifyToken(token, secret);
-    
+
     if (!payload) {
-      return c.json({ success: false, error: 'Invalid token' }, 401);
+      return c.json({ success: false, error: "Invalid token" }, 401);
     }
 
     // Check if user is banned
     const userDoId = c.env.USER_DO.idFromName(payload.sub);
     const userStub = c.env.USER_DO.get(userDoId);
-    const bannedResp = await userStub.fetch('https://do.internal/is-banned');
-    const bannedData = await bannedResp.json() as { isBanned: boolean };
-    
+    const bannedResp = await userStub.fetch("https://do.internal/is-banned");
+    const bannedData = (await bannedResp.json()) as { isBanned: boolean };
+
     if (bannedData.isBanned) {
-      return c.json({ success: false, error: 'Account banned' }, 403);
+      return c.json({ success: false, error: "Account banned" }, 403);
     }
 
     // Forward to user's WebSocketDO preserving upgrade semantics
     const wsDoId = c.env.WEBSOCKET_DO.idFromName(payload.sub);
     const wsStub = c.env.WEBSOCKET_DO.get(wsDoId);
-    
+
     // Clone original request with /connect path
     const originalReq = c.req.raw;
     const url = new URL(originalReq.url);
-    url.pathname = '/connect';
+    url.pathname = "/connect";
     const forwardedReq = new Request(url.toString(), originalReq);
-    
+
     return await wsStub.fetch(forwardedReq);
   } catch (error) {
-    console.error('WebSocket auth error:', error);
-    return c.json({ success: false, error: 'Authentication failed' }, 401);
+    console.error("WebSocket auth error:", error);
+    return c.json({ success: false, error: "Authentication failed" }, 401);
   }
 });
 
 // Mount auth routes
-app.route('/api/auth', authRoutes);
+app.route("/api/auth", authRoutes);
 
 // Mount users routes
-app.route('/api/users', usersRoutes);
+app.route("/api/users", usersRoutes);
 
 // Mount posts routes
-app.route('/api/posts', postsRoutes);
+app.route("/api/posts", postsRoutes);
 
 // Mount feed routes
-app.route('/api/feed', feedRoutes);
+app.route("/api/feed", feedRoutes);
 
 // Mount search routes
-app.route('/api/search', searchRoutes);
+app.route("/api/search", searchRoutes);
 
 // Mount media routes
-app.route('/api/media', mediaRoutes);
+app.route("/api/media", mediaRoutes);
 
 // Mount moderation routes (admin only)
-app.route('/api/moderation', moderationRoutes);
+app.route("/api/moderation", moderationRoutes);
 
 // Mount admin dashboard routes (admin only)
-app.route('/api/admin', adminRoutes);
+app.route("/api/admin", adminRoutes);
 
 // Mount notifications routes
-app.route('/api/notifications', notificationsRoutes);
+app.route("/api/notifications", notificationsRoutes);
 
 // Mount unfurl routes (URL metadata extraction)
-app.route('/api/unfurl', unfurlRoutes);
+app.route("/api/unfurl", unfurlRoutes);
 
 // Mount seed routes (DEBUG ONLY - remove in production)
-app.route('/debug', seedRoutes);
+app.route("/debug", seedRoutes);
 
 // Serve media files
-app.route('/media', mediaRoutes);
+app.route("/media", mediaRoutes);
 
-app.get('/css/styles.css', async (_c) => {
+app.get("/css/styles.css", async (_c) => {
   const css = `/* ============================================
    THE WIRE - MULTI-THEME SYSTEM
    shadcn/ui-inspired theming with Twitter precision
@@ -7666,11 +7908,11 @@ button, a, .nav-item, .post-card, .tab, .icon-button {
 }`;
 
   return new Response(css, {
-    headers: { 'Content-Type': 'text/css' },
+    headers: { "Content-Type": "text/css" },
   });
 });
 
-app.get('/js/api.js', (_c) => {
+app.get("/js/api.js", (_c) => {
   const js = `const API_BASE = '/api';
 
 async function apiRequest(endpoint, options = {}) {
@@ -8066,16 +8308,18 @@ const notificationBadge = {
 
   update(count) {
     this.count = count;
-    const badge = document.getElementById('notification-badge');
+    const badges = document.querySelectorAll('#notification-badge, #bottom-notification-badge');
 
-    if (badge) {
-      if (count > 0) {
-        badge.textContent = count > 99 ? '99+' : count.toString();
-        badge.classList.add('show');
-      } else {
-        badge.classList.remove('show');
+    badges.forEach(badge => {
+      if (badge) {
+        if (count > 0) {
+          badge.textContent = count > 99 ? '99+' : count.toString();
+          badge.classList.add('show');
+        } else {
+          badge.classList.remove('show');
+        }
       }
-    }
+    });
   },
 
   increment() {
@@ -8136,20 +8380,21 @@ function linkifyMentions(text) {
   return result;
 }`;
   return new Response(js, {
-    headers: { 'Content-Type': 'application/javascript' },
+    headers: { "Content-Type": "application/javascript" },
   });
 });
 
 // 404 fallback - return HTML for browser requests, JSON for API requests
 app.notFound((c) => {
   const path = new URL(c.req.url).pathname;
-  const isApiRequest = path.startsWith('/api/');
-  
+  const isApiRequest = path.startsWith("/api/");
+
   if (isApiRequest) {
-    return c.json({ success: false, error: 'Not found' }, 404);
+    return c.json({ success: false, error: "Not found" }, 404);
   }
-  
-  return c.html(`
+
+  return c.html(
+    `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8167,9 +8412,26 @@ app.notFound((c) => {
       <a href="/" class="cta" style="display: inline-block; padding: 1rem 2rem; background: linear-gradient(135deg, #00d9ff 0%, #0077ff 100%); color: #fff; text-decoration: none; border-radius: 50px; font-weight: 600;">Go Home</a>
     </div>
   </div>
+  <script>
+    const bottomNav = document.getElementById('bottom-nav');
+    let lastScrollY = window.scrollY;
+    if (bottomNav) {
+      window.addEventListener('scroll', () => {
+        const currentScrollY = window.scrollY;
+        if (currentScrollY > lastScrollY && currentScrollY > 50) {
+          bottomNav.classList.add('hidden');
+        } else if (currentScrollY < lastScrollY) {
+          bottomNav.classList.remove('hidden');
+        }
+        lastScrollY = currentScrollY;
+      });
+    }
+  </script>
 </body>
 </html>
-  `, 404);
+  `,
+    404,
+  );
 });
 
 // Error handler with structured logging
@@ -8177,8 +8439,8 @@ app.onError((err, c) => {
   // Inline structured error logging for production debugging
   const errorLog = {
     timestamp: new Date().toISOString(),
-    level: 'error',
-    message: 'Unhandled request error',
+    level: "error",
+    message: "Unhandled request error",
     error: {
       name: err.name,
       message: err.message,
@@ -8191,20 +8453,20 @@ app.onError((err, c) => {
     },
   };
   console.error(JSON.stringify(errorLog));
-  return c.json({ success: false, error: 'Internal server error' }, 500);
+  return c.json({ success: false, error: "Internal server error" }, 500);
 });
 
 // Export Durable Objects
-export { UserDO } from './durable-objects/UserDO';
-export { PostDO } from './durable-objects/PostDO';
-export { FeedDO } from './durable-objects/FeedDO';
-export { WebSocketDO } from './durable-objects/WebSocketDO';
+export { UserDO } from "./durable-objects/UserDO";
+export { PostDO } from "./durable-objects/PostDO";
+export { FeedDO } from "./durable-objects/FeedDO";
+export { WebSocketDO } from "./durable-objects/WebSocketDO";
 
 // OPTIMIZED: Helper to process followers in chunks with concurrency control
 async function processFanoutChunk<T>(
   items: T[],
   processor: (item: T) => Promise<void>,
-  concurrency: number = 5
+  concurrency: number = 5,
 ): Promise<void> {
   for (let i = 0; i < items.length; i += concurrency) {
     const chunk = items.slice(i, i + concurrency);
@@ -8215,27 +8477,27 @@ async function processFanoutChunk<T>(
 // Queue consumer handler for fan-out processing
 // OPTIMIZED: Chunks followers, skips duplicate author add, limits concurrency
 async function queueHandler(
-  batch: MessageBatch<import('./types/feed').FanOutMessage>,
+  batch: MessageBatch<import("./types/feed").FanOutMessage>,
   env: Env,
-  _ctx: ExecutionContext
+  _ctx: ExecutionContext,
 ): Promise<void> {
   for (const message of batch.messages) {
     try {
       const msg = message.body;
 
-      if (msg.type === 'new_post') {
+      if (msg.type === "new_post") {
         // Add to author's own feed first
         const authorFeedId = env.FEED_DO.idFromName(msg.authorId);
         const authorFeedStub = env.FEED_DO.get(authorFeedId);
-        await authorFeedStub.fetch('https://do.internal/add-entry', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        await authorFeedStub.fetch("https://do.internal/add-entry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             entry: {
               postId: msg.postId,
               authorId: msg.authorId,
               timestamp: msg.timestamp,
-              source: 'own',
+              source: "own",
             },
           }),
         });
@@ -8243,11 +8505,17 @@ async function queueHandler(
         // Get author's followers
         const authorDoId = env.USER_DO.idFromName(msg.authorId);
         const authorStub = env.USER_DO.get(authorDoId);
-        const followersResp = await authorStub.fetch('https://do.internal/followers');
-        const followersData = await followersResp.json() as { followers: string[] };
+        const followersResp = await authorStub.fetch(
+          "https://do.internal/followers",
+        );
+        const followersData = (await followersResp.json()) as {
+          followers: string[];
+        };
 
         // OPTIMIZED: Filter out author (already added above) to avoid duplicate
-        const followers = followersData.followers.filter(id => id !== msg.authorId);
+        const followers = followersData.followers.filter(
+          (id) => id !== msg.authorId,
+        );
 
         // Get post metadata once for broadcasts
         const postData = await env.POSTS_KV.get(`post:${msg.postId}`);
@@ -8255,72 +8523,86 @@ async function queueHandler(
 
         // OPTIMIZED: Process followers in chunks of 10 with concurrency of 5
         // This keeps subrequests under control for large follower lists
-        await processFanoutChunk(followers, async (followerId) => {
-          const feedId = env.FEED_DO.idFromName(followerId);
-          const feedStub = env.FEED_DO.get(feedId);
+        await processFanoutChunk(
+          followers,
+          async (followerId) => {
+            const feedId = env.FEED_DO.idFromName(followerId);
+            const feedStub = env.FEED_DO.get(feedId);
 
-          await feedStub.fetch('https://do.internal/add-entry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              entry: {
-                postId: msg.postId,
-                authorId: msg.authorId,
-                timestamp: msg.timestamp,
-                source: 'follow',
-              },
-            }),
-          });
+            await feedStub.fetch("https://do.internal/add-entry", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                entry: {
+                  postId: msg.postId,
+                  authorId: msg.authorId,
+                  timestamp: msg.timestamp,
+                  source: "follow",
+                },
+              }),
+            });
 
-          // Broadcast new post to follower's WebSocket connections
-          if (postMetadata) {
-            try {
-              const wsDoId = env.WEBSOCKET_DO.idFromName(followerId);
-              const wsStub = env.WEBSOCKET_DO.get(wsDoId);
-              await wsStub.fetch('https://do.internal/broadcast-post', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ post: postMetadata }),
-              });
-            } catch {
-              // Ignore WebSocket broadcast errors - not critical
+            // Broadcast new post to follower's WebSocket connections
+            if (postMetadata) {
+              try {
+                const wsDoId = env.WEBSOCKET_DO.idFromName(followerId);
+                const wsStub = env.WEBSOCKET_DO.get(wsDoId);
+                await wsStub.fetch("https://do.internal/broadcast-post", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ post: postMetadata }),
+                });
+              } catch {
+                // Ignore WebSocket broadcast errors - not critical
+              }
             }
-          }
-        }, 5);
-      } else if (msg.type === 'delete_post') {
+          },
+          5,
+        );
+      } else if (msg.type === "delete_post") {
         // Remove from author's feed
         const authorFeedId = env.FEED_DO.idFromName(msg.authorId);
         const authorFeedStub = env.FEED_DO.get(authorFeedId);
-        await authorFeedStub.fetch('https://do.internal/remove-entry', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        await authorFeedStub.fetch("https://do.internal/remove-entry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ postId: msg.postId }),
         });
 
         // Get author's followers and remove from their feeds
         const authorDoId = env.USER_DO.idFromName(msg.authorId);
         const authorStub = env.USER_DO.get(authorDoId);
-        const followersResp = await authorStub.fetch('https://do.internal/followers');
-        const followersData = await followersResp.json() as { followers: string[] };
+        const followersResp = await authorStub.fetch(
+          "https://do.internal/followers",
+        );
+        const followersData = (await followersResp.json()) as {
+          followers: string[];
+        };
 
         // OPTIMIZED: Filter out author and process in chunks
-        const followers = followersData.followers.filter(id => id !== msg.authorId);
+        const followers = followersData.followers.filter(
+          (id) => id !== msg.authorId,
+        );
 
-        await processFanoutChunk(followers, async (followerId) => {
-          const feedId = env.FEED_DO.idFromName(followerId);
-          const feedStub = env.FEED_DO.get(feedId);
+        await processFanoutChunk(
+          followers,
+          async (followerId) => {
+            const feedId = env.FEED_DO.idFromName(followerId);
+            const feedStub = env.FEED_DO.get(feedId);
 
-          await feedStub.fetch('https://do.internal/remove-entry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: msg.postId }),
-          });
-        }, 5);
+            await feedStub.fetch("https://do.internal/remove-entry", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ postId: msg.postId }),
+            });
+          },
+          5,
+        );
       }
 
       message.ack();
     } catch (error) {
-      console.error('Error processing queue message:', error);
+      console.error("Error processing queue message:", error);
       const backoff = Math.min(3600, 30 ** message.attempts);
       message.retry({ delaySeconds: backoff });
     }
@@ -8331,7 +8613,7 @@ async function queueHandler(
 async function scheduledHandler(
   event: ScheduledEvent,
   env: Env,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<void> {
   await handleScheduled(event, env, ctx);
 }

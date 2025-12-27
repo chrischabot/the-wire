@@ -297,8 +297,8 @@ export function getPostCardRendererScript(config: PostRenderConfig): string {
     showInteractiveActions = true,
     enableLinkCards = true,
     showRepostIndicator = true,
-    currentUserHandle = '',
-    currentUserId = ''
+    currentUserHandle = "",
+    currentUserId = "",
   } = config;
 
   return `
@@ -403,9 +403,9 @@ export function getPostCardRendererScript(config: PostRenderConfig): string {
       const interactiveAttr = postConfig.showInteractiveActions ? 'data-action' : 'data-display';
 
       return '<div class="post-actions" onclick="event.stopPropagation()">' +
-        '<span class="post-action">' +
+        '<span class="post-action" ' + interactiveAttr + '="reply" data-post-id="' + actionPostId + '">' +
           '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
-          ' ' + (displayReplyCount || 0) +
+          ' <span class="reply-count">' + (displayReplyCount || 0) + '</span>' +
         '</span>' +
         '<span class="post-action' + repostedClass + '" ' + interactiveAttr + '="repost" data-post-id="' + actionPostId + '">' +
           '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
@@ -541,6 +541,21 @@ export function getPostActionHandlersScript(): string {
           btn.addEventListener('click', handleRepost);
         }
       });
+      document.querySelectorAll('[data-action="reply"]').forEach(btn => {
+        if (!btn.hasAttribute('data-handler-attached')) {
+          btn.setAttribute('data-handler-attached', 'true');
+          btn.addEventListener('click', handleReply);
+        }
+      });
+    }
+
+    function handleReply(e) {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      const postId = btn.dataset.postId;
+      if (postId) {
+        window.location.href = '/post/' + postId + '?reply=true';
+      }
     }
 
     async function handleLike(e) {
@@ -606,9 +621,7 @@ export function getPostActionHandlersScript(): string {
  * Generates a complete post rendering script with all features
  */
 export function getCompletePostScript(config: PostRenderConfig): string {
-  const parts = [
-    getSharedUtilsScript(),
-  ];
+  const parts = [getSharedUtilsScript()];
 
   if (config.showDropdownMenu) {
     parts.push(getDropdownMenuScript());
@@ -620,5 +633,5 @@ export function getCompletePostScript(config: PostRenderConfig): string {
     parts.push(getPostActionHandlersScript());
   }
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
