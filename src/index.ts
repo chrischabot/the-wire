@@ -2370,7 +2370,7 @@ app.get("/post/:id", (c) => {
           if (delPostId === postId) {
             window.location.href = '/home';
           } else {
-            loadReplies();
+            loadReplies(false);
           }
         }
       } catch (e) {
@@ -2520,7 +2520,7 @@ app.get("/post/:id", (c) => {
             replyingToEl.innerHTML = 'Replying to ' + links.join(' ');
           }
           
-          loadReplies();
+          loadReplies(false);
         }
       } catch (error) {
         document.getElementById('post-container').innerHTML =
@@ -2677,7 +2677,7 @@ app.get("/post/:id", (c) => {
             }
 
             setTimeout(() => {
-              loadReplies();
+              loadReplies(false);
               replySuccess.textContent = '';
             }, 500);
           }
@@ -2690,69 +2690,114 @@ app.get("/post/:id", (c) => {
       });
     }
 
-    async function loadReplies() {
+    let repliesCursor = null;
+    let hasMoreReplies = false;
+    let isLoadingReplies = false;
+
+    function renderReplyCard(reply) {
+      const date = new Date(reply.createdAt);
+      const timeStr = formatTimeAgo(date);
+      
+      const avatarHtml = reply.authorAvatarUrl
+        ? '<img src="' + reply.authorAvatarUrl + '" class="avatar media-zoomable" data-fullsrc="' + reply.authorAvatarUrl + '" data-zoomable="true" alt="' + reply.authorDisplayName + '" role="button" tabindex="0" onclick="event.stopPropagation()">'
+        : '<div class="avatar" style="background: #1D9BF0;"></div>';
+      
+      const likedClass = reply.hasLiked ? ' liked' : '';
+      const isOwnReply = currentUser && currentUser.handle && currentUser.handle.toLowerCase() === reply.authorHandle.toLowerCase();
+
+      return '<div class="post-card" data-post-id="' + reply.id + '" onclick="window.location.href=\\'/post/' + reply.id + '\\'">' +
+        '<div class="post-header">' +
+          '<a href="/u/' + reply.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
+          '<div class="post-body">' +
+            '<div class="post-header-top">' +
+              '<div class="post-author-row">' +
+                '<a href="/u/' + reply.authorHandle + '" class="post-author" onclick="event.stopPropagation()">' + escapeHtml(reply.authorDisplayName) + '</a>' +
+                '<a href="/u/' + reply.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + reply.authorHandle + '</a>' +
+                '<span class="post-timestamp">' + timeStr + '</span>' +
+              '</div>' +
+              renderPostMenu(reply.id, reply.authorHandle, isOwnReply) +
+            '</div>' +
+            '<div class="post-content">' + linkifyMentions(escapeHtml(reply.content)) + '</div>' +
+            (reply.mediaUrls && reply.mediaUrls.length > 0 ?
+              '<div class="post-media">' + reply.mediaUrls.map(url =>
+                '<img src="' + url + '" class="post-media-item media-zoomable" data-fullsrc="' + url + '" data-zoomable="true" alt="Reply media" role="button" tabindex="0" onclick="event.stopPropagation()">'
+              ).join('') + '</div>' : '') +
+            '<div class="post-actions" onclick="event.stopPropagation()">' +
+              '<span class="post-action" onclick="window.location.href=\\'/post/' + reply.id + '\\'" title="Reply">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+                ' ' + reply.replyCount +
+              '</span>' +
+              '<span class="post-action" data-action="repost" data-post-id="' + reply.id + '">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
+                ' <span class="repost-count">' + reply.repostCount + '</span>' +
+              '</span>' +
+              '<span class="post-action' + likedClass + '" data-action="like" data-post-id="' + reply.id + '">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' +
+                ' <span class="like-count">' + reply.likeCount + '</span>' +
+              '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    async function loadReplies(append) {
+      if (isLoadingReplies) return;
+      isLoadingReplies = true;
+
       try {
-        const response = await fetch('/api/posts/' + postId + '/thread');
-        const data = await response.json();
-        
         const repliesContainer = document.getElementById('replies-container');
         
-        if (data.success && data.data.replies && data.data.replies.length > 0) {
-          repliesContainer.innerHTML = data.data.replies.map(reply => {
-            const date = new Date(reply.createdAt);
-            const timeStr = formatTimeAgo(date);
-            
-            const avatarHtml = reply.authorAvatarUrl
-              ? '<img src="' + reply.authorAvatarUrl + '" class="avatar media-zoomable" data-fullsrc="' + reply.authorAvatarUrl + '" data-zoomable="true" alt="' + reply.authorDisplayName + '" role="button" tabindex="0" onclick="event.stopPropagation()">'
-              : '<div class="avatar" style="background: #1D9BF0;"></div>';
-            
-            const likedClass = reply.hasLiked ? ' liked' : '';
-            
-            const isOwnReply = currentUser && currentUser.handle && currentUser.handle.toLowerCase() === reply.authorHandle.toLowerCase();
+        if (!append) {
+          repliesCursor = null;
+          repliesContainer.innerHTML = '<div class="empty-state">Loading...</div>';
+        }
 
-            return '<div class="post-card" data-post-id="' + reply.id + '" onclick="window.location.href=\\'/post/' + reply.id + '\\'">' +
-              '<div class="post-header">' +
-                '<a href="/u/' + reply.authorHandle + '" onclick="event.stopPropagation()">' + avatarHtml + '</a>' +
-                '<div class="post-body">' +
-                  '<div class="post-header-top">' +
-                    '<div class="post-author-row">' +
-                      '<a href="/u/' + reply.authorHandle + '" class="post-author" onclick="event.stopPropagation()">' + escapeHtml(reply.authorDisplayName) + '</a>' +
-                      '<a href="/u/' + reply.authorHandle + '" class="post-handle" onclick="event.stopPropagation()">@' + reply.authorHandle + '</a>' +
-                      '<span class="post-timestamp">' + timeStr + '</span>' +
-                    '</div>' +
-                    renderPostMenu(reply.id, reply.authorHandle, isOwnReply) +
-                  '</div>' +
-                  '<div class="post-content">' + linkifyMentions(escapeHtml(reply.content)) + '</div>' +
-                  (reply.mediaUrls && reply.mediaUrls.length > 0 ?
-                    '<div class="post-media">' + reply.mediaUrls.map(url =>
-                      '<img src="' + url + '" class="post-media-item media-zoomable" data-fullsrc="' + url + '" data-zoomable="true" alt="Reply media" role="button" tabindex="0" onclick="event.stopPropagation()">'
-                    ).join('') + '</div>' : '') +
-                  '<div class="post-actions" onclick="event.stopPropagation()">' +
-                    '<span class="post-action" onclick="window.location.href=\\'/post/' + reply.id + '\\'" title="Reply">' +
-                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
-                      ' ' + reply.replyCount +
-                    '</span>' +
-                    '<span class="post-action" data-action="repost" data-post-id="' + reply.id + '">' +
-                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
-                      ' <span class="repost-count">' + reply.repostCount + '</span>' +
-                    '</span>' +
-                    '<span class="post-action' + likedClass + '" data-action="like" data-post-id="' + reply.id + '">' +
-                      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' +
-                      ' <span class="like-count">' + reply.likeCount + '</span>' +
-                    '</span>' +
-                  '</div>' +
-                '</div>' +
-              '</div>' +
-            '</div>';
-          }).join('');
-          // Attach action handlers for the newly rendered replies
-          attachReplyActionHandlers();
-        } else {
-          repliesContainer.innerHTML = '<div class="empty-state">No replies yet. Be the first to reply!</div>';
+        const url = '/api/posts/' + postId + '/replies' + (repliesCursor ? '?cursor=' + repliesCursor : '');
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success) {
+          const replies = data.data.replies || [];
+          repliesCursor = data.data.cursor;
+          hasMoreReplies = data.data.hasMore;
+
+          if (replies.length > 0) {
+            const html = replies.map(renderReplyCard).join('');
+            
+            if (append) {
+              const loadMoreBtn = document.getElementById('load-more-replies');
+              if (loadMoreBtn) loadMoreBtn.remove();
+              repliesContainer.insertAdjacentHTML('beforeend', html);
+            } else {
+              repliesContainer.innerHTML = html;
+            }
+
+            if (hasMoreReplies) {
+              repliesContainer.insertAdjacentHTML('beforeend', 
+                '<div class="load-more-section">' +
+                  '<button id="load-more-replies" class="load-more-btn">Load more replies</button>' +
+                '</div>'
+              );
+              document.getElementById('load-more-replies').addEventListener('click', function() {
+                this.textContent = 'Loading...';
+                this.disabled = true;
+                loadReplies(true);
+              });
+            }
+
+            attachReplyActionHandlers();
+          } else if (!append) {
+            repliesContainer.innerHTML = '<div class="empty-state">No replies yet. Be the first to reply!</div>';
+          }
         }
       } catch (error) {
         console.error('Error loading replies:', error);
-        document.getElementById('replies-container').innerHTML = '<div class="error">Error loading replies</div>';
+        if (!append) {
+          document.getElementById('replies-container').innerHTML = '<div class="error">Error loading replies</div>';
+        }
+      } finally {
+        isLoadingReplies = false;
       }
     }
 

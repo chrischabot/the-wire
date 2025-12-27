@@ -364,6 +364,82 @@ posts.get("/:id/thread", optionalAuth, async (c) => {
 });
 
 /**
+ * GET /api/posts/:id/replies - Get paginated replies for a post
+ */
+posts.get("/:id/replies", optionalAuth, async (c) => {
+  const postId = c.req.param("id");
+  const userId = c.get("userId");
+  const cursor = c.req.query("cursor");
+  const limit = Math.min(
+    parseInt(c.req.query("limit") || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10),
+    LIMITS.MAX_PAGINATION_LIMIT,
+  );
+
+  const replyIndexKey = `replies:${postId}`;
+  const replyIndexData = await c.env.POSTS_KV.get(replyIndexKey);
+
+  if (!replyIndexData) {
+    return success({ replies: [], cursor: null, hasMore: false });
+  }
+
+  const replyIds: string[] = JSON.parse(replyIndexData);
+  const newestFirstIds = replyIds.slice().reverse();
+
+  let startIndex = 0;
+  if (cursor) {
+    const cursorIndex = newestFirstIds.indexOf(cursor);
+    if (cursorIndex !== -1) {
+      startIndex = cursorIndex + 1;
+    }
+  }
+
+  const replyIdsToFetch = newestFirstIds.slice(startIndex, startIndex + limit);
+  const replies: PostMetadata[] = [];
+
+  for (const replyId of replyIdsToFetch) {
+    const replyData = await c.env.POSTS_KV.get(`post:${replyId}`);
+    if (!replyData) continue;
+
+    const reply = JSON.parse(replyData);
+    if (reply.isDeleted) continue;
+
+    let hasLiked = false;
+    if (userId) {
+      try {
+        const doId = c.env.POST_DO.idFromName(reply.id);
+        const stub = c.env.POST_DO.get(doId);
+        const likedResp = await stub.fetch(
+          `https://do.internal/has-liked?userId=${userId}`,
+        );
+        const likedData = (await likedResp.json()) as { hasLiked: boolean };
+        hasLiked = likedData.hasLiked;
+      } catch {
+        // Ignore
+      }
+    }
+    replies.push({ ...reply, hasLiked });
+  }
+
+  const sortOwnRepliesFirst = (a: PostMetadata, b: PostMetadata) => {
+    const aIsOwnReply = userId && a.authorId === userId;
+    const bIsOwnReply = userId && b.authorId === userId;
+    if (aIsOwnReply && !bIsOwnReply) return -1;
+    if (!aIsOwnReply && bIsOwnReply) return 1;
+    return a.createdAt - b.createdAt;
+  };
+  replies.sort(sortOwnRepliesFirst);
+
+  const lastReplyId = replyIdsToFetch[replyIdsToFetch.length - 1];
+  const hasMore = startIndex + limit < newestFirstIds.length;
+
+  return success({
+    replies,
+    cursor: hasMore ? lastReplyId : null,
+    hasMore,
+  });
+});
+
+/**
  * DELETE /api/posts/:id - Delete own post
  */
 posts.delete("/:id", requireAuth, async (c) => {
