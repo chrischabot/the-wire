@@ -284,11 +284,9 @@ posts.get("/:id/thread", optionalAuth, async (c) => {
   const replyIndexData = await c.env.POSTS_KV.get(replyIndexKey);
 
   if (replyIndexData) {
-    // Use the index
     const replyIds: string[] = JSON.parse(replyIndexData);
-
-    // Fetch reply posts (limit to avoid subrequest limit)
-    const replyIdsToFetch = replyIds.slice(0, Math.min(limit, 50));
+    const newestFirstIds = replyIds.slice().reverse();
+    const replyIdsToFetch = newestFirstIds.slice(0, Math.min(limit, 50));
 
     for (const replyId of replyIdsToFetch) {
       const replyData = await c.env.POSTS_KV.get(`post:${replyId}`);
