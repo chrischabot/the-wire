@@ -1,0 +1,62 @@
+digraph Architecture {
+  rankdir=LR;
+  bgcolor="white";
+  nodesep=0.6;
+  ranksep=0.8;
+  fontname="Helvetica";
+
+  node [shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#CBD5E1", fontname="Helvetica", fontsize=10];
+  edge [color="#64748B", fontname="Helvetica", fontsize=9];
+
+  subgraph cluster_client {
+    label="Client";
+    color="#E2E8F0";
+    style="rounded";
+    Browser [label="Browser UI"];
+  }
+
+  subgraph cluster_edge {
+    label="Cloudflare Workers";
+    color="#E2E8F0";
+    style="rounded";
+    Worker [label="Hono Worker\nHTML + API + WebSocket"];
+  }
+
+  subgraph cluster_do {
+    label="Durable Objects";
+    color="#E2E8F0";
+    style="rounded";
+    UserDO [label="UserDO\nprofiles + settings + context"];
+    PostDO [label="PostDO\nlikes + reposts"];
+    FeedDO [label="FeedDO\ntimeline"];
+    WebSocketDO [label="WebSocketDO\nrealtime"];
+  }
+
+  subgraph cluster_storage {
+    label="Storage";
+    color="#E2E8F0";
+    style="rounded";
+    KV [label="KV Namespaces\nUSERS / POSTS / SESSIONS / FEEDS"];
+    R2 [label="R2 Media Bucket"];
+  }
+
+  subgraph cluster_async {
+    label="Async";
+    color="#E2E8F0";
+    style="rounded";
+    Queue [label="Fanout Queue"];
+    Cron [label="Scheduled Jobs\nrankings + cleanup"];
+  }
+
+  Browser -> Worker [label="HTTP/WS"];
+  Worker -> UserDO;
+  Worker -> PostDO;
+  Worker -> FeedDO;
+  Worker -> WebSocketDO;
+  Worker -> KV;
+  Worker -> R2;
+  Worker -> Queue [label="fanout"];
+  Queue -> FeedDO;
+  Queue -> WebSocketDO;
+  Cron -> KV;
+}

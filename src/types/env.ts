@@ -41,6 +41,9 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   WORKER_URL?: string;
   INITIAL_ADMIN_HANDLE?: string;
+
+  // External APIs
+  ANTHROPIC_API_KEY?: string;
 }
 
 /**

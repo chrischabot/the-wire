@@ -55,7 +55,15 @@ export interface UserProfile {
 export interface UserSettings {
   emailNotifications: boolean;
   privateAccount: boolean;
-  mutedWords: string[];
+  mutedWords: MutedWordEntry[];
+}
+
+export type MutedWordScope = "all" | "not_following";
+
+export interface MutedWordEntry {
+  word: string;
+  scope?: MutedWordScope;
+  expiresAt?: number | null;
 }
 
 /**

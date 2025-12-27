@@ -66,37 +66,27 @@
   </div>
 
   <script src="/js/api.js"></script>
+  <script src="/js/validation.js"></script>
+  <script src="/js/form-handler.js"></script>
   <script>
-    const form = document.getElementById('signup-form');
-    const submitBtn = document.getElementById('submit-btn');
-    const errorMsg = document.getElementById('error-message');
-    const successMsg = document.getElementById('success-message');
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      errorMsg.textContent = '';
-      successMsg.textContent = '';
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Creating account...';
-
-      const email = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
-      const handle = document.getElementById('handle').value;
-
-      try {
-        const response = await auth.signup(email, password, handle);
-        
-        if (response.success) {
-          successMsg.textContent = 'Account created! Redirecting...';
-          setTimeout(() => {
-            window.location.href = '/home';
-          }, 1000);
+    new FormHandler({
+      formId: 'signup-form',
+      submitText: 'Create Account',
+      loadingText: 'Creating account...',
+      successText: 'Account created! Redirecting...',
+      redirectUrl: '/home',
+      async onSubmit(data) {
+        // Validate
+        const errors = Validation.validateForm({
+          email: data.email,
+          password: data.password,
+          handle: data.handle
+        });
+        if (errors) {
+          throw new Error(Object.values(errors)[0]);
         }
-      } catch (error) {
-        errorMsg.textContent = error.message;
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Create Account';
+
+        return await auth.signup(data.email, data.password, data.handle);
       }
     });
   </script>

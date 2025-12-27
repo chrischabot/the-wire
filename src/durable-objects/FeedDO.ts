@@ -5,6 +5,7 @@
 
 import type { Env } from '../types/env';
 import type { PostMetadata } from '../types/post';
+import type { MutedWordEntry } from '../types/user';
 import { LIMITS } from '../constants';
 
 export interface FeedEntry {
@@ -63,7 +64,7 @@ export class FeedDO implements DurableObject {
   private async applyFilters(
     entries: FeedEntry[],
     blockedUserIds: string[],
-    mutedWords: string[]
+    mutedWords: Array<string | MutedWordEntry>
   ): Promise<FeedEntry[]> {
     let filtered = entries;
 
@@ -74,8 +75,10 @@ export class FeedDO implements DurableObject {
 
     // Filter posts with muted words
     if (mutedWords.length > 0) {
-      const normalizedMuted = mutedWords.map((w) => w.toLowerCase());
-      
+      const normalizedMuted = this.normalizeMutedWords(mutedWords);
+      const mutedMatcher = this.buildMutedWordMatcher(normalizedMuted);
+      if (!mutedMatcher) return filtered;
+
       const entriesWithContent = await Promise.all(
         filtered.map(async (entry) => {
           try {
@@ -84,12 +87,10 @@ export class FeedDO implements DurableObject {
             if (!postData) return { entry, include: false };
             
             const post: PostMetadata = JSON.parse(postData);
-            const contentLower = post.content.toLowerCase();
+            const content = post.content || post.originalPost?.content || '';
             
             // Check if content contains any muted word
-            const hasMutedWord = normalizedMuted.some((word) => 
-              contentLower.includes(word)
-            );
+            const hasMutedWord = mutedMatcher(content);
             
             return { entry, include: !hasMutedWord };
           } catch (error) {
@@ -143,7 +144,7 @@ export class FeedDO implements DurableObject {
     cursor?: string,
     limit: number = 20,
     blockedUserIds: string[] = [],
-    mutedWords: string[] = []
+    mutedWords: Array<string | MutedWordEntry> = []
   ): Promise<{
     entries: FeedEntry[];
     cursor: string | null;
@@ -229,7 +230,7 @@ export class FeedDO implements DurableObject {
         
         // Parse filter params with validation
         let blockedUserIds: string[] = [];
-        let mutedWords: string[] = [];
+        let mutedWords: Array<string | MutedWordEntry> = [];
         
         const blockedParam = url.searchParams.get('blocked');
         if (blockedParam) {
@@ -261,6 +262,38 @@ export class FeedDO implements DurableObject {
         });
       }
 
+      // BATCHED: Get feed with full post data (reduces worker subrequests)
+      if (path === '/feed-with-posts' && method === 'GET') {
+        const cursor = url.searchParams.get('cursor') || undefined;
+        const limit = parseInt(url.searchParams.get('limit') || '20', 10);
+
+        const result = await this.getFeed(cursor, limit, [], []);
+
+        // Fetch full post data for each entry - this happens inside DO context
+        const posts: Array<Record<string, unknown> & { source: string }> = [];
+        for (const entry of result.entries.slice(0, limit)) {
+          const postData = await this.env.POSTS_KV.get(`post:${entry.postId}`);
+          if (postData) {
+            try {
+              const post = JSON.parse(postData);
+              if (!post.isDeleted && !post.isTakenDown) {
+                posts.push({ ...post, source: entry.source });
+              }
+            } catch {
+              // Skip invalid post data
+            }
+          }
+        }
+
+        return new Response(JSON.stringify({
+          posts,
+          cursor: result.cursor,
+          hasMore: result.hasMore,
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       // Clear feed
       if (path === '/clear' && method === 'POST') {
         await this.clear();
@@ -285,5 +318,44 @@ export class FeedDO implements DurableObject {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+  }
+
+  private normalizeMutedWords(
+    input: Array<string | MutedWordEntry>
+  ): string[] {
+    if (!Array.isArray(input)) return [];
+    const now = Date.now();
+    const unique = new Set<string>();
+
+    for (const entry of input) {
+      if (typeof entry === 'string') {
+        const word = entry.trim().toLowerCase();
+        if (word) unique.add(word);
+        continue;
+      }
+      if (!entry || typeof entry !== 'object') continue;
+      if (entry.scope === 'not_following') continue;
+      if (typeof entry.expiresAt === 'number' && entry.expiresAt <= now) continue;
+      const word = String(entry.word || '').trim().toLowerCase();
+      if (word) unique.add(word);
+    }
+
+    return [...unique];
+  }
+
+  private buildMutedWordMatcher(
+    mutedWords: string[]
+  ): ((content: string) => boolean) | null {
+    if (!mutedWords.length) return null;
+    const escaped = mutedWords
+      .map((word) => this.escapeRegex(word.trim().toLowerCase()))
+      .filter((word) => word.length > 0);
+    if (escaped.length === 0) return null;
+    const regex = new RegExp(`\\b(${escaped.join('|')})\\b`, 'i');
+    return (content: string) => regex.test(content || '');
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }

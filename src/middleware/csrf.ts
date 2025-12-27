@@ -34,6 +34,8 @@ const EXEMPT_PATHS = [
   '/api/auth/login',
   '/api/auth/signup',
   '/health',
+  '/debug/reset', // For testing database reset
+  '/debug/bootstrap-admin', // For bootstrapping first admin
 ];
 
 /**
@@ -157,38 +159,6 @@ export function csrfProtection(options: {
         {
           success: false,
           error: 'CSRF validation failed: Invalid origin',
-        },
-        403
-      );
-    }
-
-    await next();
-  });
-}
-
-/**
- * Strict same-origin policy middleware
- * Only allows requests from the exact same origin
- */
-export function sameOriginOnly() {
-  return createMiddleware<{ Bindings: Env }>(async (c, next): Promise<Response | void> => {
-    const method = c.req.method;
-    
-    // Skip for safe methods
-    if (!PROTECTED_METHODS.includes(method)) {
-      await next();
-      return;
-    }
-
-    const origin = getOrigin(c);
-    const requestUrl = new URL(c.req.url);
-    const expectedOrigin = `${requestUrl.protocol}//${requestUrl.host}`;
-
-    if (origin && origin !== expectedOrigin) {
-      return c.json(
-        {
-          success: false,
-          error: 'Cross-origin requests not allowed',
         },
         403
       );

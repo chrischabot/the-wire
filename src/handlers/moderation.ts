@@ -81,9 +81,6 @@ moderation.post('/users/:handle/ban', requireAuth, requireAdmin, async (c) => {
     body: JSON.stringify({ reason: body.reason.trim() }),
   });
   
-  // Log the action
-  console.log(`User ${targetHandle} banned by admin ${c.get('userId')} - Reason: ${body.reason}`);
-  
   return c.json({
     success: true,
     data: { message: `User @${targetHandle} has been banned` },
@@ -109,10 +106,7 @@ moderation.post('/users/:handle/unban', requireAuth, requireAdmin, async (c) => 
   await targetStub.fetch('https://do.internal/unban', {
     method: 'POST',
   });
-  
-  // Log the action
-  console.log(`User ${targetHandle} unbanned by admin ${c.get('userId')}`);
-  
+
   return c.json({
     success: true,
     data: { message: `User @${targetHandle} has been unbanned` },
@@ -154,10 +148,7 @@ moderation.post('/posts/:id/takedown', requireAuth, requireAdmin, async (c) => {
   post.takenDownReason = body.reason || 'Removed by moderator';
   post.takenDownBy = c.get('userId');
   await c.env.POSTS_KV.put(`post:${postId}`, JSON.stringify(post));
-  
-  // Log the action
-  console.log(`Post ${postId} taken down by admin ${c.get('userId')} - Reason: ${body.reason || 'No reason provided'}`);
-  
+
   return c.json({
     success: true,
     data: { message: 'Post has been taken down' },
@@ -233,8 +224,7 @@ moderation.post('/users/:handle/set-admin', requireAuth, requireAdmin, async (c)
   });
   
   const action = body.isAdmin ? 'granted admin privileges' : 'had admin privileges revoked';
-  console.log(`User ${targetHandle} ${action} by admin ${c.get('userId')}`);
-  
+
   return c.json({
     success: true,
     data: { message: `User @${targetHandle} ${action}` },

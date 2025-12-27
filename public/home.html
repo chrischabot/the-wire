@@ -10,11 +10,9 @@
   <div class="twitter-layout">
     <!-- Left Sidebar -->
     <aside class="sidebar-left">
-      <div class="logo">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" fill="currentColor"/>
-        </svg>
-      </div>
+      <a href="/home" class="logo">
+        <span class="logo-text">The Wire</span>
+      </a>
 
       <nav>
         <a href="/home" class="nav-item active">
@@ -103,6 +101,8 @@
     // State
     let currentUser = null;
     let openDropdown = null;
+    let nextCursor = null;
+    let isLoadingMore = false;
 
     // Check if authenticated
     if (!auth.isAuthenticated()) {
@@ -143,8 +143,11 @@
       openDropdown = null;
     }
 
+    // Track following state per handle
+    const followingState = {};
+
     // Toggle dropdown
-    function toggleDropdown(postId) {
+    async function toggleDropdown(postId, authorHandle, isOwnPost) {
       const dropdown = document.getElementById(`dropdown-${postId}`);
       const backdrop = document.getElementById('dropdown-backdrop');
 
@@ -157,6 +160,83 @@
       dropdown.classList.add('open');
       backdrop.classList.remove('hidden');
       openDropdown = postId;
+
+      // If it's not own post, check following state
+      if (!isOwnPost) {
+        const followBtn = document.getElementById(`follow-btn-${postId}`);
+        if (followBtn) {
+          const textSpan = followBtn.querySelector('.follow-text');
+          // Check if we already know the state
+          if (followingState[authorHandle] === undefined) {
+            textSpan.textContent = 'Loading...';
+            try {
+              const profile = await users.getProfile(authorHandle);
+              followingState[authorHandle] = profile.data?.isFollowing || false;
+            } catch (e) {
+              followingState[authorHandle] = false;
+            }
+          }
+          updateFollowButton(postId, authorHandle, followingState[authorHandle]);
+        }
+      }
+    }
+
+    // Update follow button text
+    function updateFollowButton(postId, handle, isFollowing) {
+      const followBtn = document.getElementById(`follow-btn-${postId}`);
+      if (followBtn) {
+        const textSpan = followBtn.querySelector('.follow-text');
+        textSpan.textContent = isFollowing ? `Unfollow @${handle}` : `Follow @${handle}`;
+        followBtn.classList.toggle('following', isFollowing);
+      }
+    }
+
+    // Toggle follow/unfollow
+    async function toggleFollow(handle, postId) {
+      const followBtn = document.getElementById(`follow-btn-${postId}`);
+      const textSpan = followBtn?.querySelector('.follow-text');
+      const isCurrentlyFollowing = followingState[handle] || false;
+
+      try {
+        if (textSpan) textSpan.textContent = 'Loading...';
+
+        if (isCurrentlyFollowing) {
+          await social.unfollow(handle);
+          followingState[handle] = false;
+        } else {
+          await social.follow(handle);
+          followingState[handle] = true;
+        }
+
+        updateFollowButton(postId, handle, followingState[handle]);
+        closeAllDropdowns();
+      } catch (error) {
+        console.error('Error toggling follow:', error);
+        alert('Failed to update follow status: ' + error.message);
+        updateFollowButton(postId, handle, isCurrentlyFollowing);
+      }
+    }
+
+    // Block user
+    async function blockUser(handle) {
+      if (!confirm(`Are you sure you want to block @${handle}? They won't be able to see your posts or interact with you.`)) {
+        return;
+      }
+
+      try {
+        await social.block(handle);
+        // Remove all posts from this user from the feed
+        document.querySelectorAll('.post-card').forEach(card => {
+          const dropdown = card.querySelector('.post-dropdown');
+          if (dropdown && dropdown.dataset.author === handle) {
+            card.remove();
+          }
+        });
+        closeAllDropdowns();
+      } catch (error) {
+        console.error('Error blocking user:', error);
+        alert('Failed to block user: ' + error.message);
+      }
     }
 
     // Delete post
@@ -210,14 +290,14 @@
                   <span class="post-timestamp">${formatTimestamp(post.createdAt)}</span>
                 </div>
                 <div class="post-menu-container">
-                  <button class="post-more-btn" onclick="event.stopPropagation(); toggleDropdown('${post.id}')" aria-label="More options">
+                  <button class="post-more-btn" onclick="event.stopPropagation(); toggleDropdown('${post.id}', '${post.authorHandle}', ${isOwnPost})" aria-label="More options">
                     <svg viewBox="0 0 24 24">
                       <circle cx="5" cy="12" r="2"></circle>
                       <circle cx="12" cy="12" r="2"></circle>
                       <circle cx="19" cy="12" r="2"></circle>
                     </svg>
                   </button>
-                  <div class="post-dropdown" id="dropdown-${post.id}">
+                  <div class="post-dropdown" id="dropdown-${post.id}" data-author="${post.authorHandle}">
                     ${isOwnPost ? `
                       <button class="post-dropdown-item destructive" onclick="event.stopPropagation(); deletePost('${post.id}')">
                         <svg viewBox="0 0 24 24" fill="currentColor">
@@ -225,19 +305,20 @@
                         </svg>
                         Delete
                       </button>
-                    ` : ''}
-                    <button class="post-dropdown-item" onclick="event.stopPropagation(); closeAllDropdowns()">
-                      <svg viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8zm1-4h-2v-2h2v2zm0-4h-2V7h2v5z"/>
-                      </svg>
-                      Not interested
-                    </button>
-                    <button class="post-dropdown-item" onclick="event.stopPropagation(); navigator.clipboard.writeText(window.location.origin + '/post/' + '${post.id}'); closeAllDropdowns()">
-                      <svg viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M18.36 5.64c-1.95-1.96-5.11-1.96-7.07 0L9.88 7.05 8.46 5.64l1.42-1.42c2.73-2.73 7.16-2.73 9.9 0 2.73 2.74 2.73 7.17 0 9.9l-1.42 1.42-1.41-1.42 1.41-1.41c1.96-1.96 1.96-5.12 0-7.07zm-2.12 3.53l-7.07 7.07-1.41-1.41 7.07-7.07 1.41 1.41zm-12.02.71l1.42-1.42 1.41 1.42-1.41 1.41c-1.96 1.96-1.96 5.12 0 7.07 1.95 1.96 5.11 1.96 7.07 0l1.41-1.41 1.42 1.41-1.42 1.42c-2.73 2.73-7.16 2.73-9.9 0-2.73-2.74-2.73-7.17 0-9.9z"/>
-                      </svg>
-                      Copy link
-                    </button>
+                    ` : `
+                      <button class="post-dropdown-item follow-btn" id="follow-btn-${post.id}" onclick="event.stopPropagation(); toggleFollow('${post.authorHandle}', '${post.id}')">
+                        <svg viewBox="0 0 24 24" fill="currentColor" class="follow-icon">
+                          <path d="M12 11.816c1.355 0 2.872-.15 3.84-1.256.814-.93 1.078-2.368.806-4.392-.38-2.825-2.117-4.512-4.646-4.512S7.734 3.343 7.354 6.168c-.272 2.024-.008 3.462.806 4.392.968 1.107 2.485 1.256 3.84 1.256zM8.84 6.368c.162-1.2.787-3.212 3.16-3.212s2.998 2.013 3.16 3.212c.207 1.55.057 2.627-.45 3.205-.455.52-1.266.743-2.71.743s-2.255-.223-2.71-.743c-.507-.578-.657-1.656-.45-3.205zm11.44 12.868c-.877-3.526-4.282-5.99-8.28-5.99s-7.403 2.464-8.28 5.99c-.172.692-.028 1.4.395 1.94.408.52 1.04.82 1.733.82h12.304c.693 0 1.325-.3 1.733-.82.424-.54.567-1.247.394-1.94zm-1.576 1.016c-.126.16-.316.252-.552.252H5.848c-.235 0-.426-.092-.552-.252-.137-.175-.18-.412-.12-.654.71-2.855 3.517-4.85 6.824-4.85s6.114 1.994 6.824 4.85c.06.242.017.479-.12.654z"/>
+                        </svg>
+                        <span class="follow-text">Follow @${post.authorHandle}</span>
+                      </button>
+                      <button class="post-dropdown-item destructive" onclick="event.stopPropagation(); blockUser('${post.authorHandle}')">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zM4 12c0-4.411 3.589-8 8-8 1.848 0 3.55.633 4.906 1.688L5.688 16.906C4.633 15.55 4 13.848 4 12zm8 8c-1.848 0-3.55-.633-4.906-1.688L18.312 7.094C19.367 8.45 20 10.152 20 12c0 4.411-3.589 8-8 8z"/>
+                        </svg>
+                        Block @${post.authorHandle}
+                      </button>
+                    `}
                   </div>
                 </div>
               </div>
@@ -254,9 +335,6 @@
                 <button class="post-action ${post.hasLiked ? 'liked' : ''}" onclick="event.stopPropagation(); toggleLike('${post.id}', ${post.hasLiked || false})">
                   <svg viewBox="0 0 24 24"><path d="${post.hasLiked ? 'M20.884 13.19c-1.351 2.48-4.001 5.12-8.379 7.67l-.503.3-.504-.3c-4.379-2.55-7.029-5.19-8.382-7.67-1.36-2.5-1.41-4.86-.514-6.67.887-1.79 2.647-2.91 4.601-3.01 1.651-.09 3.368.56 4.798 2.01 1.429-1.45 3.146-2.1 4.796-2.01 1.954.1 3.714 1.22 4.601 3.01.896 1.81.846 4.17-.514 6.67z' : 'M16.697 5.5c-1.222-.06-2.679.51-3.89 2.16l-.805 1.09-.806-1.09C9.984 6.01 8.526 5.44 7.304 5.5c-1.243.07-2.349.78-2.91 1.91-.552 1.12-.633 2.78.479 4.82 1.074 1.97 3.257 4.27 7.129 6.61 3.87-2.34 6.052-4.64 7.126-6.61 1.111-2.04 1.03-3.7.477-4.82-.561-1.13-1.666-1.84-2.908-1.91zm4.187 7.69c-1.351 2.48-4.001 5.12-8.379 7.67l-.503.3-.504-.3c-4.379-2.55-7.029-5.19-8.382-7.67-1.36-2.5-1.41-4.86-.514-6.67.887-1.79 2.647-2.91 4.601-3.01 1.651-.09 3.368.56 4.798 2.01 1.429-1.45 3.146-2.1 4.796-2.01 1.954.1 3.714 1.22 4.601 3.01.896 1.81.846 4.17-.514 6.67z'}" fill="currentColor"/></svg>
                   <span>${post.likeCount > 0 ? formatNumber(post.likeCount) : ''}</span>
-                </button>
-                <button class="post-action" onclick="event.stopPropagation()">
-                  <svg viewBox="0 0 24 24"><path d="M12 2.59l5.7 5.7-1.41 1.42L13 6.41V16h-2V6.41l-3.3 3.3-1.41-1.42L12 2.59zM21 15l-.02 3.51c0 1.38-1.12 2.49-2.5 2.49H5.5C4.11 21 3 19.88 3 18.5V15h2v3.5c0 .28.22.5.5.5h12.98c.28 0 .5-.22.5-.5L19 15h2z" fill="currentColor"/></svg>
                 </button>
               </div>
             </div>
@@ -288,15 +366,56 @@
     }
 
     // Load feed
-    async function loadFeed() {
+    async function loadFeed(cursor = null) {
       const container = document.getElementById('feed-container');
 
-      try {
-        const response = await feed.getHome();
+      // Show loading state for initial load
+      if (!cursor) {
+        container.innerHTML = '<div class="empty-state" id="loading-state">Loading...</div>';
+      }
 
-        if (response.success && response.data.posts && response.data.posts.length > 0) {
-          container.innerHTML = response.data.posts.map(item => renderPost(item.post || item)).join('');
-        } else {
+      try {
+        const response = await feed.getHome(cursor);
+
+        if (response.success && response.data) {
+          const posts = response.data.posts || [];
+          // Backend returns 'cursor' field, not 'nextCursor'
+          nextCursor = response.data.cursor || null;
+
+          if (posts.length > 0) {
+            // If loading more, append; otherwise replace
+            const postsHtml = posts.map(item => renderPost(item.post || item)).join('');
+
+            if (cursor) {
+              // Remove the load more button if it exists
+              const loadMoreBtn = document.getElementById('load-more-section');
+              if (loadMoreBtn) loadMoreBtn.remove();
+              container.insertAdjacentHTML('beforeend', postsHtml);
+            } else {
+              container.innerHTML = postsHtml;
+            }
+
+            // Add load more button if there's a next cursor
+            if (nextCursor) {
+              const existingBtn = document.getElementById('load-more-section');
+              if (existingBtn) existingBtn.remove();
+
+              container.insertAdjacentHTML('beforeend', `
+                <div class="load-more-section" id="load-more-section">
+                  <button class="load-more-btn" onclick="loadMorePosts()">Load More</button>
+                </div>
+              `);
+            }
+          } else if (!cursor) {
+            // No posts on initial load
+            container.innerHTML = `
+              <div class="empty-state">
+                <p>No posts yet</p>
+                <p class="text-muted mt-1">Follow some people to see their posts here, or create your first post!</p>
+              </div>
+            `;
+          }
+        } else if (!cursor) {
           container.innerHTML = `
             <div class="empty-state">
               <p>No posts yet</p>
@@ -306,13 +425,35 @@
         }
       } catch (error) {
         console.error('Error loading feed:', error);
-        container.innerHTML = `
-          <div class="empty-state">
-            <p>Welcome to The Wire!</p>
-            <p class="text-muted mt-1">Create your first post to get started.</p>
-          </div>
-        `;
+
+        // Only show error on initial load, not on load more
+        if (!cursor) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>Failed to load feed</p>
+              <p class="text-muted mt-1">Please try again later.</p>
+            </div>
+          `;
+        } else {
+          alert('Failed to load more posts. Please try again.');
+        }
+      } finally {
+        isLoadingMore = false;
       }
+    }
+
+    // Load more posts
+    async function loadMorePosts() {
+      if (isLoadingMore || !nextCursor) return;
+
+      isLoadingMore = true;
+      const loadMoreBtn = document.querySelector('.load-more-btn');
+      if (loadMoreBtn) {
+        loadMoreBtn.textContent = 'Loading...';
+        loadMoreBtn.disabled = true;
+      }
+
+      await loadFeed(nextCursor);
     }
 
     // Initialize compose box

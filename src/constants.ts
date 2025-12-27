@@ -3,6 +3,11 @@
  */
 
 /**
+ * Founder account - all new users auto-follow this account
+ */
+export const FOUNDER_HANDLE = 'chabotc';
+
+/**
  * System limits
  */
 export const LIMITS = {
@@ -52,21 +57,24 @@ export const RETENTION = {
 
 /**
  * Scoring parameters
+ *
+ * Tuned based on research of Twitter, Reddit, and HN algorithms.
+ * Key insight: gentler decay + higher reply weight = better engagement visibility.
  */
 export const SCORING = {
-  /** Hacker News aging exponent */
-  HN_AGING_EXPONENT: 1.8,
-  
-  /** Hacker News base offset (hours) */
-  HN_BASE_OFFSET: 2,
-  
-  /** Reply weight in ranking */
-  REPLY_WEIGHT: 2,
-  
-  /** Repost weight in ranking */
-  REPOST_WEIGHT: 1.5,
-  
-  /** Like weight in ranking */
+  /** Hacker News aging exponent - lower = gentler decay (Reddit ~1.2, HN ~1.5) */
+  HN_AGING_EXPONENT: 1.3,
+
+  /** Hacker News base offset (hours) - grace period before decay kicks in */
+  HN_BASE_OFFSET: 4,
+
+  /** Reply weight - replies indicate discussion (Twitter: replies = 27x retweets) */
+  REPLY_WEIGHT: 10,
+
+  /** Repost weight - reposts amplify reach */
+  REPOST_WEIGHT: 3,
+
+  /** Like weight - base unit of engagement */
   LIKE_WEIGHT: 1,
 } as const;
 
@@ -94,3 +102,8 @@ export const PLACEHOLDERS = {
   /** Default banner - gradient background */
   BANNER: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 200'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%231d9bf0'/%3E%3Cstop offset='100%25' stop-color='%230d4f7a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect fill='url(%23g)' width='600' height='200'/%3E%3C/svg%3E",
 } as const;
+
+/**
+ * Re-export shared utilities for backwards compatibility
+ */
+export { MENTION_REGEX, ElementIds } from './shared/utils';

@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import type { Env } from '../types/env';
 import { generateId } from '../services/snowflake';
 import { requireAuth } from '../middleware/auth';
+import { rateLimit, RATE_LIMITS } from '../middleware/rate-limit';
 
 const media = new Hono<{ Bindings: Env }>();
 
@@ -103,7 +104,7 @@ function validateFile(
 /**
  * POST /api/media/upload - Upload media (image or video)
  */
-media.post('/upload', requireAuth, async (c) => {
+media.post('/upload', requireAuth, rateLimit(RATE_LIMITS.upload), async (c) => {
   const userId = c.get('userId');
 
   let body: any;

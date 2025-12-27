@@ -29,6 +29,7 @@ export function getJwtSecret(env: Env): string {
 
 /**
  * Authentication middleware - requires valid JWT
+ * OPTIMIZED: Uses KV cache for ban status (60s TTL) to avoid DO call on every request
  */
 export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next): Promise<Response | void> => {
   const authHeader = c.req.header('Authorization');
@@ -57,22 +58,45 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next): 
   c.set('userEmail', payload.email);
   c.set('userHandle', payload.handle);
 
-  // Check if user is banned
-  const doId = c.env.USER_DO.idFromName(payload.sub);
-  const stub = c.env.USER_DO.get(doId);
+  // OPTIMIZED: Check ban status from KV cache first (avoids DO call on every request)
+  const banCacheKey = `ban-status:${payload.sub}`;
   try {
-    const bannedResp = await stub.fetch('https://do.internal/is-banned');
-    const bannedData = await bannedResp.json() as { isBanned: boolean };
-    
-    if (bannedData.isBanned) {
-      return c.json({ 
-        success: false, 
-        error: 'Account has been banned' 
-      }, 403);
+    const cachedBanStatus = await c.env.SESSIONS_KV.get(banCacheKey);
+
+    if (cachedBanStatus !== null) {
+      // Cache hit - use cached value
+      if (cachedBanStatus === 'banned') {
+        return c.json({
+          success: false,
+          error: 'Account has been banned'
+        }, 403);
+      }
+      // cachedBanStatus === 'active' - proceed
+    } else {
+      // Cache miss - fetch from DO and cache result
+      const doId = c.env.USER_DO.idFromName(payload.sub);
+      const stub = c.env.USER_DO.get(doId);
+      const bannedResp = await stub.fetch('https://do.internal/is-banned');
+      const bannedData = await bannedResp.json() as { isBanned: boolean };
+
+      // Cache for 60 seconds (short TTL so bans take effect quickly)
+      await c.env.SESSIONS_KV.put(
+        banCacheKey,
+        bannedData.isBanned ? 'banned' : 'active',
+        { expirationTtl: 60 }
+      );
+
+      if (bannedData.isBanned) {
+        return c.json({
+          success: false,
+          error: 'Account has been banned'
+        }, 403);
+      }
     }
   } catch (error) {
-    // If check fails, allow request but log error
-    console.error('Error checking ban status:', error);
+    console.error('Ban check failed:', error);
+    // Fail closed - if we can't verify ban status, deny access
+    return c.json({ success: false, error: 'Unable to verify account status' }, 503);
   }
 
   await next();
@@ -97,6 +121,59 @@ export const optionalAuth = createMiddleware<{ Bindings: Env }>(async (c, next):
     } catch {
       // JWT_SECRET not configured - silently skip auth
     }
+  }
+
+  await next();
+});
+
+/**
+ * Admin authentication middleware - requires valid JWT and admin privileges
+ */
+export const requireAdmin = createMiddleware<{ Bindings: Env }>(async (c, next): Promise<Response | void> => {
+  // First, require authentication
+  const authHeader = c.req.header('Authorization');
+  const token = extractToken(authHeader ?? null);
+
+  if (!token) {
+    return c.json({ success: false, error: 'Authentication required' }, 401);
+  }
+
+  let secret: string;
+  try {
+    secret = getJwtSecret(c.env);
+  } catch {
+    console.error('JWT_SECRET not configured');
+    return c.json({ success: false, error: 'Server configuration error' }, 500);
+  }
+
+  const payload = await verifyToken(token, secret);
+
+  if (!payload) {
+    return c.json({ success: false, error: 'Invalid or expired token' }, 401);
+  }
+
+  // Set user info in context
+  c.set('userId', payload.sub);
+  c.set('userEmail', payload.email);
+  c.set('userHandle', payload.handle);
+
+  // Check if user is admin
+  const userDoId = c.env.USER_DO.idFromName(payload.sub);
+  const userStub = c.env.USER_DO.get(userDoId);
+
+  try {
+    const profileResp = await userStub.fetch('https://do.internal/profile');
+    if (!profileResp.ok) {
+      return c.json({ success: false, error: 'Failed to verify admin status' }, 500);
+    }
+
+    const profile = await profileResp.json() as { isAdmin?: boolean };
+    if (!profile.isAdmin) {
+      return c.json({ success: false, error: 'Admin access required' }, 403);
+    }
+  } catch (error) {
+    console.error('Error checking admin status:', error);
+    return c.json({ success: false, error: 'Failed to verify admin status' }, 500);
   }
 
   await next();

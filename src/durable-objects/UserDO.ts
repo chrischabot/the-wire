@@ -4,7 +4,7 @@
  */
 
 import type { Env } from '../types/env';
-import type { UserProfile, UserSettings } from '../types/user';
+import type { UserProfile, UserSettings, MutedWordEntry, MutedWordScope } from '../types/user';
 import { PLACEHOLDERS } from '../constants';
 
 interface UserState {
@@ -13,10 +13,18 @@ interface UserState {
   following: string[];      // User IDs
   followers: string[];      // User IDs
   blocked: string[];        // User IDs
+  likedPosts?: string[];    // Post IDs the user has liked (for efficient likes tab)
 }
+
+const MAX_MUTED_WORDS = 100;
 
 export class UserDO implements DurableObject {
   private state: UserState | null = null;
+
+  // OPTIMIZED: Set caches for O(1) membership checks
+  private followingSet: Set<string> | null = null;
+  private followersSet: Set<string> | null = null;
+  private blockedSet: Set<string> | null = null;
 
   constructor(
     private durableState: DurableObjectState,
@@ -25,6 +33,7 @@ export class UserDO implements DurableObject {
 
   /**
    * Lazy load state from durable storage
+   * OPTIMIZED: Builds Set caches for O(1) lookups
    */
   private async ensureState(): Promise<UserState> {
     if (this.state) {
@@ -34,6 +43,10 @@ export class UserDO implements DurableObject {
     const stored = await this.durableState.storage.get<UserState>('state');
     if (stored) {
       this.state = stored;
+      // Build Set caches for O(1) membership checks
+      this.followingSet = new Set(stored.following);
+      this.followersSet = new Set(stored.followers);
+      this.blockedSet = new Set(stored.blocked);
       return stored;
     }
 
@@ -59,6 +72,10 @@ export class UserDO implements DurableObject {
       followers: [],
       blocked: [],
     };
+    // Initialize empty Sets for O(1) lookups
+    this.followingSet = new Set();
+    this.followersSet = new Set();
+    this.blockedSet = new Set();
     await this.saveState();
   }
 
@@ -97,7 +114,12 @@ export class UserDO implements DurableObject {
    */
   async getSettings(): Promise<UserSettings> {
     const state = await this.ensureState();
-    return state.settings;
+    const { mutedWords, changed } = this.normalizeMutedWords(state.settings?.mutedWords);
+    if (changed) {
+      state.settings.mutedWords = mutedWords;
+      await this.saveState();
+    }
+    return { ...state.settings, mutedWords };
   }
 
   /**
@@ -105,89 +127,105 @@ export class UserDO implements DurableObject {
    */
   async updateSettings(updates: Partial<UserSettings>): Promise<UserSettings> {
     const state = await this.ensureState();
-    state.settings = { ...state.settings, ...updates };
+    const nextSettings = { ...state.settings, ...updates };
+    if (updates.mutedWords !== undefined) {
+      const { mutedWords } = this.normalizeMutedWords(updates.mutedWords);
+      nextSettings.mutedWords = mutedWords;
+    }
+    state.settings = nextSettings;
     await this.saveState();
     return state.settings;
   }
 
   /**
    * Follow another user
+   * OPTIMIZED: Uses Set for O(1) membership check
    */
   async follow(userId: string): Promise<void> {
-    const state = await this.ensureState();
-    if (!state.following.includes(userId)) {
-      state.following.push(userId);
-      state.profile.followingCount++;
+    await this.ensureState();
+    if (!this.followingSet!.has(userId)) {
+      this.state!.following.push(userId);
+      this.followingSet!.add(userId);
+      this.state!.profile.followingCount++;
       await this.saveState();
     }
   }
 
   /**
    * Unfollow a user
-   * Note: Users cannot unfollow themselves (enforced at API level and here as safeguard)
+   * OPTIMIZED: Uses Set for O(1) membership check
    */
   async unfollow(userId: string): Promise<void> {
-    const state = await this.ensureState();
+    await this.ensureState();
 
     // Prevent unfollowing yourself
-    if (userId === state.profile.id) {
+    if (userId === this.state!.profile.id) {
       return;
     }
 
-    const index = state.following.indexOf(userId);
-    if (index > -1) {
-      state.following.splice(index, 1);
-      state.profile.followingCount = Math.max(0, state.profile.followingCount - 1);
+    if (this.followingSet!.has(userId)) {
+      const index = this.state!.following.indexOf(userId);
+      if (index > -1) {
+        this.state!.following.splice(index, 1);
+      }
+      this.followingSet!.delete(userId);
+      this.state!.profile.followingCount = Math.max(0, this.state!.profile.followingCount - 1);
       await this.saveState();
     }
   }
 
   /**
    * Add a follower
+   * OPTIMIZED: Uses Set for O(1) membership check
    */
   async addFollower(userId: string): Promise<void> {
-    const state = await this.ensureState();
-    if (!state.followers.includes(userId)) {
-      state.followers.push(userId);
-      state.profile.followerCount++;
+    await this.ensureState();
+    if (!this.followersSet!.has(userId)) {
+      this.state!.followers.push(userId);
+      this.followersSet!.add(userId);
+      this.state!.profile.followerCount++;
       await this.saveState();
     }
   }
 
   /**
    * Remove a follower
-   * Note: Users cannot remove themselves as a follower (they always follow themselves)
+   * OPTIMIZED: Uses Set for O(1) membership check
    */
   async removeFollower(userId: string): Promise<void> {
-    const state = await this.ensureState();
+    await this.ensureState();
 
     // Prevent removing yourself as a follower
-    if (userId === state.profile.id) {
+    if (userId === this.state!.profile.id) {
       return;
     }
 
-    const index = state.followers.indexOf(userId);
-    if (index > -1) {
-      state.followers.splice(index, 1);
-      state.profile.followerCount = Math.max(0, state.profile.followerCount - 1);
+    if (this.followersSet!.has(userId)) {
+      const index = this.state!.followers.indexOf(userId);
+      if (index > -1) {
+        this.state!.followers.splice(index, 1);
+      }
+      this.followersSet!.delete(userId);
+      this.state!.profile.followerCount = Math.max(0, this.state!.profile.followerCount - 1);
       await this.saveState();
     }
   }
 
   /**
    * Block a user
-   * Note: Users cannot block themselves
+   * OPTIMIZED: Uses Set for O(1) membership check
    */
   async block(userId: string): Promise<void> {
-    const state = await this.ensureState();
+    await this.ensureState();
 
     // Prevent blocking yourself
-    if (userId === state.profile.id) {
+    if (userId === this.state!.profile.id) {
       return;
     }
 
-    if (!state.blocked.includes(userId)) {
-      state.blocked.push(userId);
+    if (!this.blockedSet!.has(userId)) {
+      this.state!.blocked.push(userId);
+      this.blockedSet!.add(userId);
       await this.saveState();
 
       await this.unfollow(userId);
@@ -197,30 +235,36 @@ export class UserDO implements DurableObject {
 
   /**
    * Unblock a user
+   * OPTIMIZED: Uses Set for O(1) membership check
    */
   async unblock(userId: string): Promise<void> {
-    const state = await this.ensureState();
-    const index = state.blocked.indexOf(userId);
-    if (index > -1) {
-      state.blocked.splice(index, 1);
+    await this.ensureState();
+    if (this.blockedSet!.has(userId)) {
+      const index = this.state!.blocked.indexOf(userId);
+      if (index > -1) {
+        this.state!.blocked.splice(index, 1);
+      }
+      this.blockedSet!.delete(userId);
       await this.saveState();
     }
   }
 
   /**
    * Check if following a user
+   * OPTIMIZED: O(1) Set lookup instead of O(n) array includes
    */
   async isFollowing(userId: string): Promise<boolean> {
-    const state = await this.ensureState();
-    return state.following.includes(userId);
+    await this.ensureState();
+    return this.followingSet!.has(userId);
   }
 
   /**
    * Check if user is blocked
+   * OPTIMIZED: O(1) Set lookup instead of O(n) array includes
    */
   async isBlocked(userId: string): Promise<boolean> {
-    const state = await this.ensureState();
-    return state.blocked.includes(userId);
+    await this.ensureState();
+    return this.blockedSet!.has(userId);
   }
 
   /**
@@ -315,6 +359,113 @@ export class UserDO implements DurableObject {
   }
 
   /**
+   * Add a liked post to user's likes list
+   */
+  async addLikedPost(postId: string): Promise<void> {
+    const state = await this.ensureState();
+    if (!state.likedPosts) state.likedPosts = [];
+    if (!state.likedPosts.includes(postId)) {
+      state.likedPosts.unshift(postId); // Add to front (most recent first)
+      // Keep only most recent 1000 likes
+      if (state.likedPosts.length > 1000) {
+        state.likedPosts = state.likedPosts.slice(0, 1000);
+      }
+      await this.saveState();
+    }
+  }
+
+  /**
+   * Remove a liked post from user's likes list
+   */
+  async removeLikedPost(postId: string): Promise<void> {
+    const state = await this.ensureState();
+    if (!state.likedPosts) return;
+    const index = state.likedPosts.indexOf(postId);
+    if (index > -1) {
+      state.likedPosts.splice(index, 1);
+      await this.saveState();
+    }
+  }
+
+  /**
+   * Get user's liked posts (most recent first)
+   */
+  async getLikedPosts(limit: number = 50): Promise<string[]> {
+    const state = await this.ensureState();
+    return (state.likedPosts || []).slice(0, limit);
+  }
+
+  private normalizeMutedWords(input: unknown): { mutedWords: MutedWordEntry[]; changed: boolean } {
+    if (!Array.isArray(input)) {
+      return { mutedWords: [], changed: input !== undefined };
+    }
+
+    const now = Date.now();
+    const mutedWords: MutedWordEntry[] = [];
+    const seen = new Set<string>();
+    let changed = false;
+
+    for (const entry of input) {
+      let word = '';
+      let scope: MutedWordScope = 'all';
+      let expiresAt: number | null | undefined;
+
+      if (typeof entry === 'string') {
+        word = entry;
+        changed = true;
+      } else if (entry && typeof entry === 'object') {
+        const rawWord = (entry as MutedWordEntry).word;
+        word = typeof rawWord === 'string' ? rawWord : '';
+        const rawScope = (entry as MutedWordEntry).scope;
+        scope = rawScope === 'not_following' ? 'not_following' : 'all';
+        if (rawScope && rawScope !== scope) {
+          changed = true;
+        }
+        const rawExpires = (entry as MutedWordEntry).expiresAt;
+        if (typeof rawExpires === 'number') {
+          expiresAt = rawExpires;
+        } else if (rawExpires != null) {
+          changed = true;
+        }
+      } else {
+        changed = true;
+        continue;
+      }
+
+      const normalized = word.trim().toLowerCase();
+      if (!normalized) {
+        changed = true;
+        continue;
+      }
+      if (normalized !== word) {
+        changed = true;
+      }
+
+      if (expiresAt && expiresAt <= now) {
+        changed = true;
+        continue;
+      }
+
+      const key = `${normalized}:${scope}`;
+      if (seen.has(key)) {
+        changed = true;
+        continue;
+      }
+      seen.add(key);
+
+      const record: MutedWordEntry = { word: normalized, scope };
+      if (expiresAt) record.expiresAt = expiresAt;
+      mutedWords.push(record);
+      if (mutedWords.length >= MAX_MUTED_WORDS) {
+        changed = true;
+        break;
+      }
+    }
+
+    return { mutedWords, changed };
+  }
+
+  /**
    * Structured logging helper for Durable Objects
    */
   private log(level: string, message: string, context?: Record<string, unknown>, error?: Error) {
@@ -327,10 +478,6 @@ export class UserDO implements DurableObject {
     };
     if (level === 'error') {
       console.error(JSON.stringify(entry));
-    } else if (level === 'warn') {
-      console.warn(JSON.stringify(entry));
-    } else {
-      console.log(JSON.stringify(entry));
     }
   }
 
@@ -342,16 +489,11 @@ export class UserDO implements DurableObject {
     const path = url.pathname;
     const method = request.method;
 
-    this.log('debug', 'UserDO request received', { path, method });
-
     try {
       // Initialize
       if (path === '/initialize' && method === 'POST') {
-        this.log('info', 'Initializing user');
         const body = await request.json() as { profile: UserProfile; settings: UserSettings };
-        this.log('debug', 'Initialize payload received', { handle: body.profile.handle, userId: body.profile.id });
         await this.initialize(body.profile, body.settings);
-        this.log('info', 'User initialized successfully', { userId: body.profile.id });
         return new Response(JSON.stringify({ success: true }), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -385,6 +527,23 @@ export class UserDO implements DurableObject {
         const updates = await request.json() as Partial<UserSettings>;
         const settings = await this.updateSettings(updates);
         return new Response(JSON.stringify(settings), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // BATCHED: Get all context in one call (blocked, mutedWords, following)
+      if (path === '/context' && method === 'GET') {
+        const state = await this.ensureState();
+        const { mutedWords, changed } = this.normalizeMutedWords(state.settings?.mutedWords);
+        if (changed) {
+          state.settings.mutedWords = mutedWords;
+          await this.saveState();
+        }
+        return new Response(JSON.stringify({
+          blocked: state.blocked || [],
+          mutedWords,
+          following: state.following || [],
+        }), {
           headers: { 'Content-Type': 'application/json' },
         });
       }
@@ -436,6 +595,31 @@ export class UserDO implements DurableObject {
         const body = await request.json() as { userId: string };
         await this.unblock(body.userId);
         return new Response(JSON.stringify({ success: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Liked posts operations
+      if (path === '/add-liked-post' && method === 'POST') {
+        const body = await request.json() as { postId: string };
+        await this.addLikedPost(body.postId);
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (path === '/remove-liked-post' && method === 'POST') {
+        const body = await request.json() as { postId: string };
+        await this.removeLikedPost(body.postId);
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (path === '/liked-posts' && method === 'GET') {
+        const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+        const likedPosts = await this.getLikedPosts(limit);
+        return new Response(JSON.stringify({ likedPosts }), {
           headers: { 'Content-Type': 'application/json' },
         });
       }
@@ -506,6 +690,29 @@ export class UserDO implements DurableObject {
         });
       }
 
+      if (path === '/posts/reset' && method === 'POST') {
+        const state = await this.ensureState();
+        state.profile.postCount = 0;
+        await this.saveState();
+        return new Response(JSON.stringify({ postCount: 0 }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Sync counts - fix mismatched follower/following counts
+      if (path === '/sync-counts' && method === 'POST') {
+        const state = await this.ensureState();
+        state.profile.followingCount = state.following.length;
+        state.profile.followerCount = state.followers.length;
+        await this.saveState();
+        return new Response(JSON.stringify({
+          followingCount: state.profile.followingCount,
+          followerCount: state.profile.followerCount,
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       // Ban operations
       if (path === '/ban' && method === 'POST') {
         const body = await request.json() as { reason: string };
@@ -545,7 +752,6 @@ export class UserDO implements DurableObject {
         });
       }
 
-      this.log('warn', 'UserDO route not found', { path, method });
       return new Response('Not found', { status: 404 });
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));

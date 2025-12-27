@@ -49,8 +49,13 @@ export interface PostMetadata {
     id: string;
     authorHandle: string;
     authorDisplayName: string;
+    authorAvatarUrl: string;
     content: string;
     mediaUrls: string[];
+    createdAt?: number;
+    likeCount?: number;
+    replyCount?: number;
+    repostCount?: number;
   };
   isDeleted?: boolean;
   deletedAt?: number;

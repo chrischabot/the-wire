@@ -145,19 +145,13 @@ export function rateLimit(config: RateLimitConfig) {
 
       await next();
     } catch (error) {
-      // On error, allow request but log
-      console.error('Rate limit error:', error);
+      console.error('Rate limit check failed:', error);
+      // Fail open for rate limiting (allow request if check fails)
+      // But log for monitoring
       await next();
     }
   });
 }
-
-/**
- * IP-based rate limiter (doesn't require auth)
- */
-export const rateLimitByIP = (config: RateLimitConfig) => {
-  return rateLimit({ ...config, perUser: false });
-};
 
 /**
  * Account lockout middleware
@@ -228,11 +222,4 @@ export function accountLockout(maxAttempts: number = 5, lockoutMinutes: number =
       await c.env.SESSIONS_KV.delete(attemptsKey);
     }
   });
-}
-
-/**
- * Clear rate limit for testing
- */
-export async function clearRateLimit(env: Env, key: string): Promise<void> {
-  await env.SESSIONS_KV.delete(key);
 }

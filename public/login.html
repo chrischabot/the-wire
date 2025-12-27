@@ -49,36 +49,26 @@
   </div>
 
   <script src="/js/api.js"></script>
+  <script src="/js/validation.js"></script>
+  <script src="/js/form-handler.js"></script>
   <script>
-    const form = document.getElementById('login-form');
-    const submitBtn = document.getElementById('submit-btn');
-    const errorMsg = document.getElementById('error-message');
-    const successMsg = document.getElementById('success-message');
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      errorMsg.textContent = '';
-      successMsg.textContent = '';
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Logging in...';
-
-      const email = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
-
-      try {
-        const response = await auth.login(email, password);
-        
-        if (response.success) {
-          successMsg.textContent = 'Logged in! Redirecting...';
-          setTimeout(() => {
-            window.location.href = '/home';
-          }, 1000);
+    new FormHandler({
+      formId: 'login-form',
+      submitText: 'Log In',
+      loadingText: 'Logging in...',
+      successText: 'Logged in! Redirecting...',
+      redirectUrl: '/home',
+      async onSubmit(data) {
+        // Validate
+        const errors = Validation.validateForm({
+          email: data.email,
+          password: data.password
+        });
+        if (errors) {
+          throw new Error(Object.values(errors)[0]);
         }
-      } catch (error) {
-        errorMsg.textContent = error.message;
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Log In';
+
+        return await auth.login(data.email, data.password);
       }
     });
   </script>
