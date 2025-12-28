@@ -52,8 +52,50 @@ feed.get("/home", requireAuth, async (c) => {
     LIMITS.MAX_PAGINATION_LIMIT,
   );
 
+  const getExploreFallback = async () => {
+    const data = await c.env.FEEDS_KV.get("explore:ranked");
+    if (!data) return null;
+    const posts = safeJsonParse<PostMetadata[]>(data);
+    if (!posts || posts.length === 0) return null;
+
+    const postIds = posts.slice(0, limit).map((p) => p.id);
+    const repostIds = posts
+      .slice(0, limit)
+      .filter((p) => p.repostOfId)
+      .map((p) => p.repostOfId!);
+    const allIds = [...new Set([...postIds, ...repostIds])];
+
+    const freshMap = await batchKVGet<PostMetadata>(
+      c.env,
+      allIds.map((id) => `post:${id}`),
+      "POSTS_KV",
+      { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+    );
+
+    return posts.slice(0, limit).map((cached) => {
+      const fresh = freshMap.get(`post:${cached.id}`) || cached;
+      const result = {
+        ...fresh,
+        source: "fof" as const,
+        hasLiked: false,
+        hasReposted: false,
+      };
+      if (result.repostOfId && result.originalPost) {
+        const freshOrig = freshMap.get(`post:${result.repostOfId}`);
+        if (freshOrig) {
+          result.originalPost = {
+            ...result.originalPost,
+            likeCount: freshOrig.likeCount,
+            replyCount: freshOrig.replyCount,
+            repostCount: freshOrig.repostCount,
+          };
+        }
+      }
+      return result;
+    });
+  };
+
   try {
-    // SINGLE CALL 1: Get all user context in one request
     const userDoId = c.env.USER_DO.idFromName(userId);
     const userStub = c.env.USER_DO.get(userDoId);
     const contextResp = await userStub.fetch("https://do.internal/context");
@@ -131,79 +173,112 @@ feed.get("/home", requireAuth, async (c) => {
     // SINGLE CALL 3: Get explore posts from pre-computed cache
     const exploreData = await c.env.FEEDS_KV.get("explore:ranked");
     let explorePosts: FeedPost[] = [];
+    let rawExplorePosts: PostMetadata[] | null = null;
 
     if (exploreData) {
-      const rawExplorePosts = safeJsonParse<PostMetadata[]>(exploreData);
-      if (rawExplorePosts) {
-        for (const post of rawExplorePosts) {
-          if (explorePosts.length >= limit) break;
-          if (seenPostIds.has(post.id)) continue;
-          if (blockedSet.has(post.authorId)) continue;
-          if (post.isDeleted || post.isTakenDown) continue;
-          if (post.authorId === userId) continue;
-          const contentForFilter =
-            post.content || post.originalPost?.content || "";
-          if (
-            contentForFilter &&
-            isMutedContent(contentForFilter, post.authorId)
-          ) {
-            continue;
-          }
-          if (post.repostOfId) {
-            if (seenOriginalIds.has(post.repostOfId)) continue;
-            seenOriginalIds.add(post.repostOfId);
-          }
+      rawExplorePosts = safeJsonParse<PostMetadata[]>(exploreData);
+    }
 
-          explorePosts.push({
-            ...post,
-            source: "fof" as const,
-            hasLiked: false,
-            hasReposted: false,
-          });
-          seenPostIds.add(post.id);
-          authorFrequency.set(
-            post.authorId,
-            (authorFrequency.get(post.authorId) || 0) + 1,
-          );
-        }
-      }
+    // Fallback: compute explore posts on-demand if cache is empty
+    if (!rawExplorePosts || rawExplorePosts.length === 0) {
+      const onDemandPosts: PostMetadata[] = [];
+      let postCursor: string | undefined;
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-      if (explorePosts.length > 0) {
-        const allExploreIds = new Set<string>();
-        for (const p of explorePosts) {
-          allExploreIds.add(p.id);
-          if (p.repostOfId) allExploreIds.add(p.repostOfId);
-        }
-        const freshExploreMap = await batchKVGet<PostMetadata>(
-          c.env,
-          [...allExploreIds].map((id) => `post:${id}`),
-          "POSTS_KV",
-          { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
-        );
-        explorePosts = explorePosts.map((cached) => {
-          const fresh = freshExploreMap.get(`post:${cached.id}`);
-          const result = fresh
-            ? {
-                ...fresh,
-                source: cached.source,
-                hasLiked: false,
-                hasReposted: false,
-              }
-            : cached;
-          if (result.repostOfId && result.originalPost) {
-            const freshOrig = freshExploreMap.get(`post:${result.repostOfId}`);
-            if (freshOrig) {
-              result.originalPost = {
-                ...result.originalPost,
-                likeCount: freshOrig.likeCount,
-                replyCount: freshOrig.replyCount,
-                repostCount: freshOrig.repostCount,
-              };
-            }
-          }
-          return result;
+      while (onDemandPosts.length < 100) {
+        const listResult = await c.env.POSTS_KV.list({
+          prefix: "post:",
+          limit: BATCH_SIZE.KV_LIST,
+          ...(postCursor ? { cursor: postCursor } : {}),
         });
+
+        for (const key of listResult.keys) {
+          const postData = await c.env.POSTS_KV.get(key.name);
+          if (!postData) continue;
+          const post = safeJsonParse<PostMetadata>(postData);
+          if (!post) continue;
+          if (post.isDeleted || post.isTakenDown) continue;
+          if (post.createdAt < sevenDaysAgo) continue;
+          onDemandPosts.push(post);
+        }
+
+        if (listResult.list_complete) break;
+        postCursor = listResult.cursor;
       }
+
+      onDemandPosts.sort((a, b) => b.createdAt - a.createdAt);
+      rawExplorePosts = onDemandPosts;
+    }
+
+    if (rawExplorePosts) {
+      for (const post of rawExplorePosts) {
+        if (explorePosts.length >= limit) break;
+        if (seenPostIds.has(post.id)) continue;
+        if (blockedSet.has(post.authorId)) continue;
+        if (post.isDeleted || post.isTakenDown) continue;
+        if (post.authorId === userId) continue;
+        const contentForFilter =
+          post.content || post.originalPost?.content || "";
+        if (
+          contentForFilter &&
+          isMutedContent(contentForFilter, post.authorId)
+        ) {
+          continue;
+        }
+        if (post.repostOfId) {
+          if (seenOriginalIds.has(post.repostOfId)) continue;
+          seenOriginalIds.add(post.repostOfId);
+        }
+
+        explorePosts.push({
+          ...post,
+          source: "fof" as const,
+          hasLiked: false,
+          hasReposted: false,
+        });
+        seenPostIds.add(post.id);
+        authorFrequency.set(
+          post.authorId,
+          (authorFrequency.get(post.authorId) || 0) + 1,
+        );
+      }
+    }
+
+    if (explorePosts.length > 0) {
+      const allExploreIds = new Set<string>();
+      for (const p of explorePosts) {
+        allExploreIds.add(p.id);
+        if (p.repostOfId) allExploreIds.add(p.repostOfId);
+      }
+      const freshExploreMap = await batchKVGet<PostMetadata>(
+        c.env,
+        [...allExploreIds].map((id) => `post:${id}`),
+        "POSTS_KV",
+        { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+      );
+      explorePosts = explorePosts.map((cached) => {
+        const fresh = freshExploreMap.get(`post:${cached.id}`);
+        const result = fresh
+          ? {
+              ...fresh,
+              source: cached.source,
+              hasLiked: false,
+              hasReposted: false,
+            }
+          : cached;
+        if (result.repostOfId && result.originalPost) {
+          const freshOrig = freshExploreMap.get(`post:${result.repostOfId}`);
+          if (freshOrig) {
+            result.originalPost = {
+              ...result.originalPost,
+              likeCount: freshOrig.likeCount,
+              replyCount: freshOrig.replyCount,
+              repostCount: freshOrig.repostCount,
+            };
+          }
+        }
+        return result;
+      });
     }
 
     // Backfill: pull recent posts from followed users when FeedDO is empty/sparse
@@ -413,12 +488,24 @@ feed.get("/home", requireAuth, async (c) => {
       }
     }
 
-    if (finalPosts.length === 0 && explorePosts.length > 0) {
-      return success({
-        items: explorePosts.slice(0, limit),
-        nextCursor: null,
-        hasMore: false,
-      });
+    if (finalPosts.length < limit) {
+      const finalPostIds = new Set(finalPosts.map((p) => p.id));
+      for (const post of explorePosts) {
+        if (finalPosts.length >= limit) break;
+        if (finalPostIds.has(post.id)) continue;
+        finalPosts.push(post);
+      }
+    }
+
+    if (finalPosts.length === 0) {
+      const fallbackPosts = await getExploreFallback();
+      if (fallbackPosts && fallbackPosts.length > 0) {
+        return success({
+          items: fallbackPosts,
+          nextCursor: null,
+          hasMore: false,
+        });
+      }
     }
 
     return success({
