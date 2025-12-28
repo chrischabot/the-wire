@@ -1,20 +1,236 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   MessageSquare,
   Repeat2,
   Heart,
-  BarChart3,
   MoreHorizontal,
   Trash2,
   UserPlus,
   Ban,
+  ExternalLink,
 } from "lucide-react";
 import type { Post } from "../../lib/api";
 import { postsApi, socialApi } from "../../lib/api";
 import { useAuthStore } from "../../stores/authStore";
-import { formatTimeAgo, linkifyContent } from "../../utils/format";
+import {
+  formatTimeAgo,
+  linkifyContent,
+  extractFirstUrl,
+  getYouTubeId,
+} from "../../utils/format";
 import { ImageModal } from "../layout";
+
+interface UnfurlData {
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  siteName?: string;
+  type?: string;
+}
+
+const linkCardStyles = {
+  container: {
+    marginTop: "12px",
+    border: "1px solid var(--border, #e2e8f0)",
+    borderRadius: "16px",
+    overflow: "hidden",
+    cursor: "pointer",
+    transition: "background 0.2s",
+  } as React.CSSProperties,
+  image: {
+    width: "100%",
+    height: "200px",
+    objectFit: "cover" as const,
+    display: "block",
+  } as React.CSSProperties,
+  smallImage: {
+    width: "120px",
+    height: "120px",
+    objectFit: "cover" as const,
+    flexShrink: 0,
+  } as React.CSSProperties,
+  content: {
+    padding: "12px",
+  } as React.CSSProperties,
+  domain: {
+    fontSize: "13px",
+    color: "var(--muted-foreground, #718096)",
+    marginBottom: "4px",
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+  } as React.CSSProperties,
+  title: {
+    fontSize: "15px",
+    fontWeight: 600,
+    color: "var(--foreground, #2d3748)",
+    marginBottom: "4px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical" as const,
+  } as React.CSSProperties,
+  description: {
+    fontSize: "14px",
+    color: "var(--muted-foreground, #718096)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical" as const,
+  } as React.CSSProperties,
+  smallContainer: {
+    marginTop: "12px",
+    border: "1px solid var(--border, #e2e8f0)",
+    borderRadius: "16px",
+    overflow: "hidden",
+    cursor: "pointer",
+    display: "flex",
+  } as React.CSSProperties,
+  youtubeContainer: {
+    marginTop: "12px",
+    borderRadius: "16px",
+    overflow: "hidden",
+    aspectRatio: "16 / 9",
+  } as React.CSSProperties,
+  youtubeIframe: {
+    width: "100%",
+    height: "100%",
+    border: "none",
+  } as React.CSSProperties,
+};
+
+const unfurlCache = new Map<string, UnfurlData | null>();
+const unfurlPending = new Map<string, Promise<UnfurlData | null>>();
+
+function YouTubeEmbed({ videoId }: { videoId: string }) {
+  return (
+    <div
+      style={linkCardStyles.youtubeContainer}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <iframe
+        src={`https://www.youtube.com/embed/${videoId}`}
+        style={linkCardStyles.youtubeIframe}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+        title="YouTube video"
+      />
+    </div>
+  );
+}
+
+function LinkCard({ url }: { url: string }) {
+  const [data, setData] = useState<UnfurlData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchUnfurl() {
+      if (unfurlCache.has(url)) {
+        const cached = unfurlCache.get(url);
+        if (!cancelled) {
+          setData(cached ?? null);
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (unfurlPending.has(url)) {
+        const result = await unfurlPending.get(url);
+        if (!cancelled) {
+          setData(result ?? null);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const fetchPromise = (async (): Promise<UnfurlData | null> => {
+        try {
+          const response = await fetch(
+            `/api/unfurl?url=${encodeURIComponent(url)}`,
+          );
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && result.data) {
+              return result.data;
+            }
+          }
+        } catch {
+          /* silently fail */
+        }
+        return null;
+      })();
+
+      unfurlPending.set(url, fetchPromise);
+      const result = await fetchPromise;
+      unfurlCache.set(url, result);
+      unfurlPending.delete(url);
+
+      if (!cancelled) {
+        setData(result);
+        setLoading(false);
+      }
+    }
+
+    fetchUnfurl();
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  if (loading || !data || (!data.title && !data.image)) {
+    return null;
+  }
+
+  const hostname = new URL(url).hostname.replace(/^www\./, "");
+  const isSmallCard = data.type === "summary" || !data.image;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  if (isSmallCard && data.image) {
+    return (
+      <div style={linkCardStyles.smallContainer} onClick={handleClick}>
+        <img src={data.image} alt="" style={linkCardStyles.smallImage} />
+        <div style={linkCardStyles.content}>
+          <div style={linkCardStyles.domain}>
+            <ExternalLink size={12} />
+            {hostname}
+          </div>
+          {data.title && <div style={linkCardStyles.title}>{data.title}</div>}
+          {data.description && (
+            <div style={linkCardStyles.description}>{data.description}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={linkCardStyles.container} onClick={handleClick}>
+      {data.image && (
+        <img src={data.image} alt="" style={linkCardStyles.image} />
+      )}
+      <div style={linkCardStyles.content}>
+        <div style={linkCardStyles.domain}>
+          <ExternalLink size={12} />
+          {hostname}
+        </div>
+        {data.title && <div style={linkCardStyles.title}>{data.title}</div>}
+        {data.description && (
+          <div style={linkCardStyles.description}>{data.description}</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface PostCardProps {
   post: Post;
@@ -31,10 +247,6 @@ export function PostCard({
 }: PostCardProps) {
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.user);
-  const [isLiked, setIsLiked] = useState(post.isLiked ?? false);
-  const [likeCount, setLikeCount] = useState(post.likeCount);
-  const [isReposted, setIsReposted] = useState(post.isReposted ?? false);
-  const [repostCount, setRepostCount] = useState(post.repostCount);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
@@ -42,12 +254,24 @@ export function PostCard({
   const isPureRepost = !!post.repostOfId && !post.content && post.originalPost;
   const displayPost = isPureRepost ? post.originalPost! : post;
 
+  const [isLiked, setIsLiked] = useState(displayPost.hasLiked ?? false);
+  const [likeCount, setLikeCount] = useState(displayPost.likeCount);
+  const [isReposted, setIsReposted] = useState(
+    displayPost.hasReposted ?? false,
+  );
+  const [repostCount, setRepostCount] = useState(displayPost.repostCount);
+
   const isOwnPost =
     currentUser?.handle?.toLowerCase() ===
     displayPost.authorHandle?.toLowerCase();
   const isOwnRepost =
     isPureRepost &&
     currentUser?.handle?.toLowerCase() === post.authorHandle?.toLowerCase();
+
+  const firstUrl = extractFirstUrl(displayPost.content);
+  const youtubeId = firstUrl ? getYouTubeId(firstUrl) : null;
+  const hasMedia = displayPost.mediaUrls && displayPost.mediaUrls.length > 0;
+  const showLinkCard = firstUrl && !hasMedia && !isPureRepost;
 
   const handleCardClick = () => {
     navigate(`/post/${isPureRepost ? displayPost.id : post.id}`);
@@ -73,16 +297,19 @@ export function PostCard({
 
   const handleRepost = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isReposted) return;
-
-    setIsReposted(true);
-    setRepostCount((c) => c + 1);
+    const wasReposted = isReposted;
+    setIsReposted(!wasReposted);
+    setRepostCount((c) => (wasReposted ? c - 1 : c + 1));
 
     try {
-      await postsApi.repost(displayPost.id);
+      if (wasReposted) {
+        await postsApi.unrepost(displayPost.id);
+      } else {
+        await postsApi.repost(displayPost.id);
+      }
     } catch {
-      setIsReposted(false);
-      setRepostCount((c) => c - 1);
+      setIsReposted(wasReposted);
+      setRepostCount((c) => (wasReposted ? c + 1 : c - 1));
     }
   };
 
@@ -114,7 +341,7 @@ export function PostCard({
       }
       setIsFollowing(!isFollowing);
     } catch {
-      /* intentionally empty */
+      /* silently fail - UX continues regardless */
     }
     setMenuOpen(false);
   };
@@ -148,8 +375,9 @@ export function PostCard({
         className="post-card"
         data-post-id={post.id}
         onClick={handleCardClick}
+        style={{ overflow: "hidden" }}
       >
-        <div className="post-header">
+        <div className="post-header" style={{ overflow: "hidden" }}>
           <Link
             to={`/u/${displayPost.authorHandle}`}
             onClick={(e) => e.stopPropagation()}
@@ -164,34 +392,85 @@ export function PostCard({
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <div className="avatar" style={{ background: "#1D9BF0" }} />
+              <div
+                className="avatar"
+                style={{ background: "var(--primary)" }}
+              />
             )}
           </Link>
 
-          <div className="post-body">
-            <div className="post-header-top">
-              <div className="post-author-row">
-                <Link
-                  to={`/u/${displayPost.authorHandle}`}
-                  className="post-author"
-                  onClick={(e) => e.stopPropagation()}
+          <div
+            className="post-body"
+            style={{ minWidth: 0, overflow: "hidden" }}
+          >
+            <div
+              className="post-header-top"
+              style={{ display: "flex", alignItems: "center", gap: "8px" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  minWidth: 0,
+                  flex: 1,
+                  flexWrap: "nowrap",
+                  gap: "4px",
+                  overflow: "hidden",
+                }}
+              >
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    maxWidth: "45%",
+                    fontWeight: 700,
+                    color: "var(--foreground)",
+                  }}
                 >
-                  {displayPost.authorDisplayName}
-                </Link>
-                <Link
-                  to={`/u/${displayPost.authorHandle}`}
-                  className="post-handle"
-                  onClick={(e) => e.stopPropagation()}
+                  <Link
+                    to={`/u/${displayPost.authorHandle}`}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ color: "inherit", textDecoration: "none" }}
+                  >
+                    {displayPost.authorDisplayName}
+                  </Link>
+                </span>
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    flexShrink: 1,
+                    minWidth: 0,
+                    color: "var(--muted-foreground)",
+                  }}
                 >
-                  @{displayPost.authorHandle}
-                </Link>
-                <span className="post-timestamp">
-                  {formatTimeAgo(new Date(displayPost.createdAt))}
+                  <Link
+                    to={`/u/${displayPost.authorHandle}`}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ color: "inherit", textDecoration: "none" }}
+                  >
+                    @{displayPost.authorHandle}
+                  </Link>
+                </span>
+                <span
+                  style={{
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    color: "var(--muted-foreground)",
+                  }}
+                >
+                  ·{" "}
+                  {formatTimeAgo(
+                    new Date(displayPost.createdAt || post.createdAt),
+                  )}
                 </span>
               </div>
 
               {showMenu && (
-                <div className="post-menu-container">
+                <div className="post-menu-container" style={{ flexShrink: 0 }}>
                   <button
                     className="post-more-btn"
                     onClick={(e) => {
@@ -295,6 +574,13 @@ export function PostCard({
               </div>
             )}
 
+            {showLinkCard &&
+              (youtubeId ? (
+                <YouTubeEmbed videoId={youtubeId} />
+              ) : (
+                <LinkCard url={firstUrl} />
+              ))}
+
             {post.originalPost && !isPureRepost && (
               <div
                 className="quoted-post"
@@ -331,7 +617,9 @@ export function PostCard({
                   onClick={handleReply}
                 >
                   <MessageSquare size={18} />
-                  <span className="reply-count">{post.replyCount || 0}</span>
+                  <span className="reply-count">
+                    {displayPost.replyCount || 0}
+                  </span>
                 </span>
                 <span
                   className={`post-action${isReposted ? " reposted" : ""}`}
@@ -348,9 +636,6 @@ export function PostCard({
                 >
                   <Heart size={18} />
                   <span className="like-count">{likeCount || 0}</span>
-                </span>
-                <span className="post-action">
-                  <BarChart3 size={18} />
                 </span>
               </div>
             )}

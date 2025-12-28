@@ -47,8 +47,8 @@ export interface Post {
   replyCount: number;
   repostCount: number;
   quoteCount: number;
-  isLiked?: boolean;
-  isReposted?: boolean;
+  hasLiked?: boolean;
+  hasReposted?: boolean;
   originalPost?: Post;
 }
 
@@ -216,22 +216,18 @@ export const usersApi = {
 
   async getFollowers(
     handle: string,
-  ): Promise<
-    ApiResponse<{ followers: { id: string; handle: string }[]; count: number }>
-  > {
+  ): Promise<ApiResponse<{ followers: UserProfile[]; count: number }>> {
     return await apiRequest<{
-      followers: { id: string; handle: string }[];
+      followers: UserProfile[];
       count: number;
     }>(`/users/${handle}/followers`);
   },
 
   async getFollowing(
     handle: string,
-  ): Promise<
-    ApiResponse<{ following: { id: string; handle: string }[]; count: number }>
-  > {
+  ): Promise<ApiResponse<{ following: UserProfile[]; count: number }>> {
     return await apiRequest<{
-      following: { id: string; handle: string }[];
+      following: UserProfile[];
       count: number;
     }>(`/users/${handle}/following`);
   },
@@ -306,16 +302,26 @@ export const postsApi = {
     });
   },
 
+  async unrepost(postId: string): Promise<ApiResponse<void>> {
+    return await apiRequest<void>(`/posts/${postId}/repost`, {
+      method: "DELETE",
+    });
+  },
+
   async getReplies(
     postId: string,
+    cursor?: string,
+    limit = 20,
   ): Promise<
     ApiResponse<{ replies: Post[]; cursor: string | null; hasMore: boolean }>
   > {
+    let url = `/posts/${postId}/replies?limit=${limit}`;
+    if (cursor) url += `&cursor=${cursor}`;
     return await apiRequest<{
       replies: Post[];
       cursor: string | null;
       hasMore: boolean;
-    }>(`/posts/${postId}/replies`);
+    }>(url);
   },
 };
 
@@ -373,11 +379,58 @@ export const notificationsApi = {
 export const searchApi = {
   async search(
     query: string,
-    type: "all" | "users" | "posts" = "all",
-  ): Promise<ApiResponse<{ users?: UserProfile[]; posts?: Post[] }>> {
-    return await apiRequest<{ users?: UserProfile[]; posts?: Post[] }>(
+    type: "top" | "people" | "posts" = "top",
+  ): Promise<ApiResponse<{ people?: UserProfile[]; posts?: Post[] }>> {
+    return await apiRequest<{ people?: UserProfile[]; posts?: Post[] }>(
       `/search?q=${encodeURIComponent(query)}&type=${type}`,
     );
+  },
+};
+
+export const adminApi = {
+  async getStats(): Promise<
+    ApiResponse<{
+      users: { total: number; banned: number; last24h: number };
+      posts: { total: number; takenDown: number; last24h: number };
+      engagement: { totalLikes: number; totalReposts: number };
+      generatedAt: number;
+    }>
+  > {
+    return await apiRequest("/admin/stats");
+  },
+
+  async getUsers(params: {
+    q?: string;
+    filter?: "all" | "banned" | "admin";
+    limit?: number;
+    offset?: number;
+  }): Promise<
+    ApiResponse<{
+      users: UserProfile[];
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    }>
+  > {
+    const searchParams = new URLSearchParams();
+    if (params.q) searchParams.set("q", params.q);
+    if (params.filter) searchParams.set("filter", params.filter);
+    if (params.limit) searchParams.set("limit", String(params.limit));
+    if (params.offset) searchParams.set("offset", String(params.offset));
+    return await apiRequest(`/admin/users?${searchParams.toString()}`);
+  },
+
+  async banUser(handle: string): Promise<ApiResponse<{ message: string }>> {
+    return await apiRequest(`/moderation/users/${handle}/ban`, {
+      method: "POST",
+    });
+  },
+
+  async unbanUser(handle: string): Promise<ApiResponse<{ message: string }>> {
+    return await apiRequest(`/moderation/users/${handle}/unban`, {
+      method: "POST",
+    });
   },
 };
 

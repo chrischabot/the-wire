@@ -3,17 +3,23 @@
  * Manages user profile, settings, and social graph
  */
 
-import type { Env } from '../types/env';
-import type { UserProfile, UserSettings, MutedWordEntry, MutedWordScope } from '../types/user';
-import { PLACEHOLDERS } from '../constants';
+import type { Env } from "../types/env";
+import type {
+  UserProfile,
+  UserSettings,
+  MutedWordEntry,
+  MutedWordScope,
+} from "../types/user";
+import { PLACEHOLDERS } from "../constants";
 
 interface UserState {
   profile: UserProfile;
   settings: UserSettings;
-  following: string[];      // User IDs
-  followers: string[];      // User IDs
-  blocked: string[];        // User IDs
-  likedPosts?: string[];    // Post IDs the user has liked (for efficient likes tab)
+  following: string[]; // User IDs
+  followers: string[]; // User IDs
+  blocked: string[]; // User IDs
+  likedPosts?: string[]; // Post IDs the user has liked (for efficient likes tab)
+  repostedPosts?: string[]; // Post IDs the user has reposted
 }
 
 const MAX_MUTED_WORDS = 100;
@@ -25,10 +31,12 @@ export class UserDO implements DurableObject {
   private followingSet: Set<string> | null = null;
   private followersSet: Set<string> | null = null;
   private blockedSet: Set<string> | null = null;
+  private likedPostsSet: Set<string> | null = null;
+  private repostedPostsSet: Set<string> | null = null;
 
   constructor(
     private durableState: DurableObjectState,
-    private env: Env
+    private env: Env,
   ) {}
 
   /**
@@ -40,17 +48,19 @@ export class UserDO implements DurableObject {
       return this.state;
     }
 
-    const stored = await this.durableState.storage.get<UserState>('state');
+    const stored = await this.durableState.storage.get<UserState>("state");
     if (stored) {
       this.state = stored;
       // Build Set caches for O(1) membership checks
       this.followingSet = new Set(stored.following);
       this.followersSet = new Set(stored.followers);
       this.blockedSet = new Set(stored.blocked);
+      this.likedPostsSet = new Set(stored.likedPosts || []);
+      this.repostedPostsSet = new Set(stored.repostedPosts || []);
       return stored;
     }
 
-    throw new Error('UserDO state not initialized');
+    throw new Error("UserDO state not initialized");
   }
 
   /**
@@ -58,13 +68,16 @@ export class UserDO implements DurableObject {
    */
   private async saveState(): Promise<void> {
     if (!this.state) return;
-    await this.durableState.storage.put('state', this.state);
+    await this.durableState.storage.put("state", this.state);
   }
 
   /**
    * Initialize a new user profile
    */
-  async initialize(profile: UserProfile, settings: UserSettings): Promise<void> {
+  async initialize(
+    profile: UserProfile,
+    settings: UserSettings,
+  ): Promise<void> {
     this.state = {
       profile,
       settings,
@@ -76,6 +89,8 @@ export class UserDO implements DurableObject {
     this.followingSet = new Set();
     this.followersSet = new Set();
     this.blockedSet = new Set();
+    this.likedPostsSet = new Set();
+    this.repostedPostsSet = new Set();
     await this.saveState();
   }
 
@@ -114,7 +129,9 @@ export class UserDO implements DurableObject {
    */
   async getSettings(): Promise<UserSettings> {
     const state = await this.ensureState();
-    const { mutedWords, changed } = this.normalizeMutedWords(state.settings?.mutedWords);
+    const { mutedWords, changed } = this.normalizeMutedWords(
+      state.settings?.mutedWords,
+    );
     if (changed) {
       state.settings.mutedWords = mutedWords;
       await this.saveState();
@@ -169,7 +186,10 @@ export class UserDO implements DurableObject {
         this.state!.following.splice(index, 1);
       }
       this.followingSet!.delete(userId);
-      this.state!.profile.followingCount = Math.max(0, this.state!.profile.followingCount - 1);
+      this.state!.profile.followingCount = Math.max(
+        0,
+        this.state!.profile.followingCount - 1,
+      );
       await this.saveState();
     }
   }
@@ -206,7 +226,10 @@ export class UserDO implements DurableObject {
         this.state!.followers.splice(index, 1);
       }
       this.followersSet!.delete(userId);
-      this.state!.profile.followerCount = Math.max(0, this.state!.profile.followerCount - 1);
+      this.state!.profile.followerCount = Math.max(
+        0,
+        this.state!.profile.followerCount - 1,
+      );
       await this.saveState();
     }
   }
@@ -360,15 +383,20 @@ export class UserDO implements DurableObject {
 
   /**
    * Add a liked post to user's likes list
+   * OPTIMIZED: Maintains Set cache for O(1) lookups
    */
   async addLikedPost(postId: string): Promise<void> {
     const state = await this.ensureState();
     if (!state.likedPosts) state.likedPosts = [];
-    if (!state.likedPosts.includes(postId)) {
+    if (!this.likedPostsSet!.has(postId)) {
       state.likedPosts.unshift(postId); // Add to front (most recent first)
+      this.likedPostsSet!.add(postId);
       // Keep only most recent 1000 likes
       if (state.likedPosts.length > 1000) {
-        state.likedPosts = state.likedPosts.slice(0, 1000);
+        const removed = state.likedPosts.splice(1000);
+        for (const id of removed) {
+          this.likedPostsSet!.delete(id);
+        }
       }
       await this.saveState();
     }
@@ -376,13 +404,17 @@ export class UserDO implements DurableObject {
 
   /**
    * Remove a liked post from user's likes list
+   * OPTIMIZED: Maintains Set cache for O(1) lookups
    */
   async removeLikedPost(postId: string): Promise<void> {
     const state = await this.ensureState();
     if (!state.likedPosts) return;
-    const index = state.likedPosts.indexOf(postId);
-    if (index > -1) {
-      state.likedPosts.splice(index, 1);
+    if (this.likedPostsSet!.has(postId)) {
+      const index = state.likedPosts.indexOf(postId);
+      if (index > -1) {
+        state.likedPosts.splice(index, 1);
+      }
+      this.likedPostsSet!.delete(postId);
       await this.saveState();
     }
   }
@@ -395,7 +427,100 @@ export class UserDO implements DurableObject {
     return (state.likedPosts || []).slice(0, limit);
   }
 
-  private normalizeMutedWords(input: unknown): { mutedWords: MutedWordEntry[]; changed: boolean } {
+  /**
+   * Check if user has liked a specific post
+   * OPTIMIZED: O(1) Set lookup
+   */
+  async hasLikedPost(postId: string): Promise<boolean> {
+    await this.ensureState();
+    return this.likedPostsSet!.has(postId);
+  }
+
+  /**
+   * BATCH: Check multiple posts for likes in one call
+   * Returns Map<postId, boolean>
+   */
+  async batchHasLiked(postIds: string[]): Promise<Map<string, boolean>> {
+    await this.ensureState();
+    const result = new Map<string, boolean>();
+    for (const postId of postIds) {
+      result.set(postId, this.likedPostsSet!.has(postId));
+    }
+    return result;
+  }
+
+  /**
+   * Add a reposted post to user's reposts list
+   * OPTIMIZED: Maintains Set cache for O(1) lookups
+   */
+  async addRepostedPost(postId: string): Promise<void> {
+    const state = await this.ensureState();
+    if (!state.repostedPosts) state.repostedPosts = [];
+    if (!this.repostedPostsSet!.has(postId)) {
+      state.repostedPosts.unshift(postId);
+      this.repostedPostsSet!.add(postId);
+      // Keep only most recent 1000 reposts
+      if (state.repostedPosts.length > 1000) {
+        const removed = state.repostedPosts.splice(1000);
+        for (const id of removed) {
+          this.repostedPostsSet!.delete(id);
+        }
+      }
+      await this.saveState();
+    }
+  }
+
+  /**
+   * Remove a reposted post from user's reposts list
+   * OPTIMIZED: Maintains Set cache for O(1) lookups
+   */
+  async removeRepostedPost(postId: string): Promise<void> {
+    const state = await this.ensureState();
+    if (!state.repostedPosts) return;
+    if (this.repostedPostsSet!.has(postId)) {
+      const index = state.repostedPosts.indexOf(postId);
+      if (index > -1) {
+        state.repostedPosts.splice(index, 1);
+      }
+      this.repostedPostsSet!.delete(postId);
+      await this.saveState();
+    }
+  }
+
+  /**
+   * Get user's reposted posts (most recent first)
+   */
+  async getRepostedPosts(limit: number = 50): Promise<string[]> {
+    const state = await this.ensureState();
+    return (state.repostedPosts || []).slice(0, limit);
+  }
+
+  /**
+   * Check if user has reposted a specific post
+   * OPTIMIZED: O(1) Set lookup
+   */
+  async hasRepostedPost(postId: string): Promise<boolean> {
+    await this.ensureState();
+    return this.repostedPostsSet!.has(postId);
+  }
+
+  /**
+   * BATCH: Check multiple posts for reposts in one call
+   * Returns Map<postId, boolean>
+   */
+  async batchHasReposted(postIds: string[]): Promise<Map<string, boolean>> {
+    await this.ensureState();
+    const result = new Map<string, boolean>();
+    for (const postId of postIds) {
+      result.set(postId, this.repostedPostsSet!.has(postId));
+    }
+    return result;
+  }
+
+  private normalizeMutedWords(input: unknown): {
+    mutedWords: MutedWordEntry[];
+    changed: boolean;
+  } {
     if (!Array.isArray(input)) {
       return { mutedWords: [], changed: input !== undefined };
     }
@@ -406,23 +531,23 @@ export class UserDO implements DurableObject {
     let changed = false;
 
     for (const entry of input) {
-      let word = '';
-      let scope: MutedWordScope = 'all';
+      let word = "";
+      let scope: MutedWordScope = "all";
       let expiresAt: number | null | undefined;
 
-      if (typeof entry === 'string') {
+      if (typeof entry === "string") {
         word = entry;
         changed = true;
-      } else if (entry && typeof entry === 'object') {
+      } else if (entry && typeof entry === "object") {
         const rawWord = (entry as MutedWordEntry).word;
-        word = typeof rawWord === 'string' ? rawWord : '';
+        word = typeof rawWord === "string" ? rawWord : "";
         const rawScope = (entry as MutedWordEntry).scope;
-        scope = rawScope === 'not_following' ? 'not_following' : 'all';
+        scope = rawScope === "not_following" ? "not_following" : "all";
         if (rawScope && rawScope !== scope) {
           changed = true;
         }
         const rawExpires = (entry as MutedWordEntry).expiresAt;
-        if (typeof rawExpires === 'number') {
+        if (typeof rawExpires === "number") {
           expiresAt = rawExpires;
         } else if (rawExpires != null) {
           changed = true;
@@ -468,15 +593,22 @@ export class UserDO implements DurableObject {
   /**
    * Structured logging helper for Durable Objects
    */
-  private log(level: string, message: string, context?: Record<string, unknown>, error?: Error) {
+  private log(
+    level: string,
+    message: string,
+    context?: Record<string, unknown>,
+    error?: Error,
+  ) {
     const entry = {
       timestamp: new Date().toISOString(),
       level,
       message,
-      context: { durableObject: 'UserDO', ...context },
-      ...(error && { error: { name: error.name, message: error.message, stack: error.stack } }),
+      context: { durableObject: "UserDO", ...context },
+      ...(error && {
+        error: { name: error.name, message: error.message, stack: error.stack },
+      }),
     };
-    if (level === 'error') {
+    if (level === "error") {
       console.error(JSON.stringify(entry));
     }
   }
@@ -491,275 +623,315 @@ export class UserDO implements DurableObject {
 
     try {
       // Initialize
-      if (path === '/initialize' && method === 'POST') {
-        const body = await request.json() as { profile: UserProfile; settings: UserSettings };
+      if (path === "/initialize" && method === "POST") {
+        const body = (await request.json()) as {
+          profile: UserProfile;
+          settings: UserSettings;
+        };
         await this.initialize(body.profile, body.settings);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Profile operations
-      if (path === '/profile' && method === 'GET') {
+      if (path === "/profile" && method === "GET") {
         const profile = await this.getProfile();
         return new Response(JSON.stringify(profile), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/profile' && method === 'PUT') {
-        const updates = await request.json() as Partial<UserProfile>;
+      if (path === "/profile" && method === "PUT") {
+        const updates = (await request.json()) as Partial<UserProfile>;
         const profile = await this.updateProfile(updates);
         return new Response(JSON.stringify(profile), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Settings operations
-      if (path === '/settings' && method === 'GET') {
+      if (path === "/settings" && method === "GET") {
         const settings = await this.getSettings();
         return new Response(JSON.stringify(settings), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/settings' && method === 'PUT') {
-        const updates = await request.json() as Partial<UserSettings>;
+      if (path === "/settings" && method === "PUT") {
+        const updates = (await request.json()) as Partial<UserSettings>;
         const settings = await this.updateSettings(updates);
         return new Response(JSON.stringify(settings), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // BATCHED: Get all context in one call (blocked, mutedWords, following)
-      if (path === '/context' && method === 'GET') {
+      if (path === "/context" && method === "GET") {
         const state = await this.ensureState();
-        const { mutedWords, changed } = this.normalizeMutedWords(state.settings?.mutedWords);
+        const { mutedWords, changed } = this.normalizeMutedWords(
+          state.settings?.mutedWords,
+        );
         if (changed) {
           state.settings.mutedWords = mutedWords;
           await this.saveState();
         }
-        return new Response(JSON.stringify({
-          blocked: state.blocked || [],
-          mutedWords,
-          following: state.following || [],
-        }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({
+            blocked: state.blocked || [],
+            mutedWords,
+            following: state.following || [],
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
 
       // Follow operations
-      if (path === '/follow' && method === 'POST') {
-        const body = await request.json() as { userId: string };
+      if (path === "/follow" && method === "POST") {
+        const body = (await request.json()) as { userId: string };
         await this.follow(body.userId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/unfollow' && method === 'POST') {
-        const body = await request.json() as { userId: string };
+      if (path === "/unfollow" && method === "POST") {
+        const body = (await request.json()) as { userId: string };
         await this.unfollow(body.userId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Follower operations
-      if (path === '/add-follower' && method === 'POST') {
-        const body = await request.json() as { userId: string };
+      if (path === "/add-follower" && method === "POST") {
+        const body = (await request.json()) as { userId: string };
         await this.addFollower(body.userId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/remove-follower' && method === 'POST') {
-        const body = await request.json() as { userId: string };
+      if (path === "/remove-follower" && method === "POST") {
+        const body = (await request.json()) as { userId: string };
         await this.removeFollower(body.userId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Block operations
-      if (path === '/block' && method === 'POST') {
-        const body = await request.json() as { userId: string };
+      if (path === "/block" && method === "POST") {
+        const body = (await request.json()) as { userId: string };
         await this.block(body.userId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/unblock' && method === 'POST') {
-        const body = await request.json() as { userId: string };
+      if (path === "/unblock" && method === "POST") {
+        const body = (await request.json()) as { userId: string };
         await this.unblock(body.userId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Liked posts operations
-      if (path === '/add-liked-post' && method === 'POST') {
-        const body = await request.json() as { postId: string };
+      if (path === "/add-liked-post" && method === "POST") {
+        const body = (await request.json()) as { postId: string };
         await this.addLikedPost(body.postId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/remove-liked-post' && method === 'POST') {
-        const body = await request.json() as { postId: string };
+      if (path === "/remove-liked-post" && method === "POST") {
+        const body = (await request.json()) as { postId: string };
         await this.removeLikedPost(body.postId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/liked-posts' && method === 'GET') {
-        const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+      if (path === "/liked-posts" && method === "GET") {
+        const limit = parseInt(url.searchParams.get("limit") || "50", 10);
         const likedPosts = await this.getLikedPosts(limit);
         return new Response(JSON.stringify({ likedPosts }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (path === "/batch-has-liked" && method === "POST") {
+        const body = (await request.json()) as { postIds: string[] };
+        const postIds = Array.isArray(body.postIds) ? body.postIds : [];
+        const likedMap = await this.batchHasLiked(postIds);
+        const liked: Record<string, boolean> = {};
+        for (const [k, v] of likedMap) {
+          liked[k] = v;
+        }
+        return new Response(JSON.stringify({ liked }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (path === "/batch-has-reposted" && method === "POST") {
+        const body = (await request.json()) as { postIds: string[] };
+        const postIds = Array.isArray(body.postIds) ? body.postIds : [];
+        const repostedMap = await this.batchHasReposted(postIds);
+        const reposted: Record<string, boolean> = {};
+        for (const [k, v] of repostedMap) {
+          reposted[k] = v;
+        }
+        return new Response(JSON.stringify({ reposted }), {
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // List operations
-      if (path === '/following' && method === 'GET') {
+      if (path === "/following" && method === "GET") {
         const following = await this.getFollowing();
         return new Response(JSON.stringify({ following }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/followers' && method === 'GET') {
+      if (path === "/followers" && method === "GET") {
         const followers = await this.getFollowers();
         return new Response(JSON.stringify({ followers }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/blocked' && method === 'GET') {
+      if (path === "/blocked" && method === "GET") {
         const blocked = await this.getBlocked();
         return new Response(JSON.stringify({ blocked }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Relationship checks
-      if (path === '/is-following' && method === 'GET') {
-        const userId = url.searchParams.get('userId');
+      if (path === "/is-following" && method === "GET") {
+        const userId = url.searchParams.get("userId");
         if (!userId) {
-          return new Response(JSON.stringify({ error: 'userId required' }), {
+          return new Response(JSON.stringify({ error: "userId required" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { "Content-Type": "application/json" },
           });
         }
         const isFollowing = await this.isFollowing(userId);
         return new Response(JSON.stringify({ isFollowing }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/is-blocked' && method === 'GET') {
-        const userId = url.searchParams.get('userId');
+      if (path === "/is-blocked" && method === "GET") {
+        const userId = url.searchParams.get("userId");
         if (!userId) {
-          return new Response(JSON.stringify({ error: 'userId required' }), {
+          return new Response(JSON.stringify({ error: "userId required" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { "Content-Type": "application/json" },
           });
         }
         const isBlocked = await this.isBlocked(userId);
         return new Response(JSON.stringify({ isBlocked }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Post count operations
-      if (path === '/posts/increment' && method === 'POST') {
+      if (path === "/posts/increment" && method === "POST") {
         const count = await this.incrementPostCount();
         return new Response(JSON.stringify({ postCount: count }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/posts/decrement' && method === 'POST') {
+      if (path === "/posts/decrement" && method === "POST") {
         const count = await this.decrementPostCount();
         return new Response(JSON.stringify({ postCount: count }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/posts/reset' && method === 'POST') {
+      if (path === "/posts/reset" && method === "POST") {
         const state = await this.ensureState();
         state.profile.postCount = 0;
         await this.saveState();
         return new Response(JSON.stringify({ postCount: 0 }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Sync counts - fix mismatched follower/following counts
-      if (path === '/sync-counts' && method === 'POST') {
+      if (path === "/sync-counts" && method === "POST") {
         const state = await this.ensureState();
         state.profile.followingCount = state.following.length;
         state.profile.followerCount = state.followers.length;
         await this.saveState();
-        return new Response(JSON.stringify({
-          followingCount: state.profile.followingCount,
-          followerCount: state.profile.followerCount,
-        }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({
+            followingCount: state.profile.followingCount,
+            followerCount: state.profile.followerCount,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
 
       // Ban operations
-      if (path === '/ban' && method === 'POST') {
-        const body = await request.json() as { reason: string };
+      if (path === "/ban" && method === "POST") {
+        const body = (await request.json()) as { reason: string };
         await this.ban(body.reason);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/unban' && method === 'POST') {
+      if (path === "/unban" && method === "POST") {
         await this.unban();
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/is-banned' && method === 'GET') {
+      if (path === "/is-banned" && method === "GET") {
         const banned = await this.isBanned();
         return new Response(JSON.stringify({ isBanned: banned }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Admin operations
-      if (path === '/set-admin' && method === 'POST') {
-        const body = await request.json() as { isAdmin: boolean };
+      if (path === "/set-admin" && method === "POST") {
+        const body = (await request.json()) as { isAdmin: boolean };
         await this.setAdmin(body.isAdmin);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (path === '/is-admin' && method === 'GET') {
+      if (path === "/is-admin" && method === "GET") {
         const admin = await this.isAdmin();
         return new Response(JSON.stringify({ isAdmin: admin }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      return new Response('Not found', { status: 404 });
+      return new Response("Not found", { status: 404 });
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.log('error', 'UserDO fetch error', { path, method }, err);
-      return new Response(JSON.stringify({ error: 'Internal error', details: err.message }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      this.log("error", "UserDO fetch error", { path, method }, err);
+      return new Response(
+        JSON.stringify({ error: "Internal error", details: err.message }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
   }
 }

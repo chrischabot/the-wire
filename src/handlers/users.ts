@@ -14,11 +14,18 @@ import {
 } from "../utils/validation";
 import { requireAuth, optionalAuth } from "../middleware/auth";
 import { rateLimit, RATE_LIMITS } from "../middleware/rate-limit";
-import { LIMITS, BATCH_SIZE, CACHE_TTL } from "../constants";
+import { LIMITS, BATCH_SIZE, CACHE_TTL, PLACEHOLDERS } from "../constants";
+import { batchKVGet } from "../utils/batch";
 import { createNotification } from "../services/notifications";
 import { indexUser, removeUserFromIndex } from "../utils/search-index";
 import { safeJsonParse, safeAtob } from "../utils/safe-parse";
-import { success, error, notFound, forbidden, serverError } from "../utils/response";
+import {
+  success,
+  error,
+  notFound,
+  forbidden,
+  serverError,
+} from "../utils/response";
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -44,7 +51,7 @@ users.put("/me", requireAuth, async (c) => {
   if (updates.displayName !== undefined) {
     const result = validateDisplayName(updates.displayName);
     if (!result.valid) {
-      return error(result.error ?? 'Invalid display name');
+      return error(result.error ?? "Invalid display name");
     }
     updates.displayName = sanitizeString(updates.displayName);
   }
@@ -52,7 +59,7 @@ users.put("/me", requireAuth, async (c) => {
   if (updates.bio !== undefined) {
     const result = validateBio(updates.bio);
     if (!result.valid) {
-      return error(result.error ?? 'Invalid bio');
+      return error(result.error ?? "Invalid bio");
     }
     updates.bio = sanitizeString(updates.bio);
   }
@@ -377,8 +384,52 @@ users.post(
       actorId: currentUserId,
     });
 
-    // Return success immediately - backfill happens in the background
-    // The home feed will also fetch posts directly from followed users as a fallback
+    try {
+      const feedDoId = c.env.FEED_DO.idFromName(currentUserId);
+      const feedStub = c.env.FEED_DO.get(feedDoId);
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const maxBackfillPosts = 20;
+
+      const userPostsIndex = await c.env.POSTS_KV.get(
+        `user-posts:${targetUserId}`,
+      );
+      if (userPostsIndex) {
+        const postIds = safeJsonParse<string[]>(userPostsIndex);
+        if (postIds) {
+          let addedCount = 0;
+          for (const postId of postIds.slice(0, maxBackfillPosts * 2)) {
+            if (addedCount >= maxBackfillPosts) break;
+
+            const postData = await c.env.POSTS_KV.get(`post:${postId}`);
+            if (!postData) continue;
+
+            const post = safeJsonParse<PostMetadata>(postData);
+            if (!post || post.isDeleted || post.createdAt < sevenDaysAgo)
+              continue;
+
+            await feedStub.fetch("https://do.internal/add-entry", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                entry: {
+                  postId: post.id,
+                  authorId: post.authorId,
+                  timestamp: post.createdAt,
+                  source: "follow",
+                },
+              }),
+            });
+            addedCount++;
+          }
+        }
+      }
+    } catch (backfillErr) {
+      console.error(
+        "Failed to backfill posts from followed user:",
+        backfillErr,
+      );
+    }
+
     return c.json({
       success: true,
       data: { message: "Followed successfully" },
@@ -446,26 +497,47 @@ users.get("/:handle/followers", async (c) => {
   const followersResp = await stub.fetch("https://do.internal/followers");
   const data = (await followersResp.json()) as { followers: string[] };
 
-  const followers = await Promise.all(
-    data.followers.map(async (followerId: string) => {
-      const followerData = await c.env.USERS_KV.get(`user:${followerId}`);
-      if (followerData) {
-        const authUser =
-          safeJsonParse<import("../types/user").AuthUser>(followerData);
-        if (!authUser) return null;
-        return { id: followerId, handle: authUser.handle };
-      }
-      return null;
-    }),
+  const userKeys = data.followers.map((id) => `user:${id}`);
+  const userMap = await batchKVGet(c.env, userKeys, "USERS_KV", {
+    parse: (val) =>
+      val ? safeJsonParse<import("../types/user").AuthUser>(val) : null,
+  });
+
+  const handlesToFetch: string[] = [];
+  const idToHandle = new Map<string, string>();
+  for (const followerId of data.followers) {
+    const authUser = userMap.get(`user:${followerId}`);
+    if (authUser?.handle) {
+      handlesToFetch.push(authUser.handle);
+      idToHandle.set(followerId, authUser.handle);
+    }
+  }
+
+  const profileKeys = handlesToFetch.map((h) => `profile:${h}`);
+  const profileMap = await batchKVGet<UserProfile>(
+    c.env,
+    profileKeys,
+    "USERS_KV",
+    {
+      parse: (val) => (val ? safeJsonParse<UserProfile>(val) : null),
+    },
   );
 
-  const validFollowers = followers.filter(
-    (f): f is { id: string; handle: string } => f !== null,
-  );
+  const followers: UserProfile[] = [];
+  for (const followerId of data.followers) {
+    const handle = idToHandle.get(followerId);
+    if (!handle) continue;
+    const profile = profileMap.get(`profile:${handle}`);
+    if (profile) {
+      profile.avatarUrl = profile.avatarUrl || PLACEHOLDERS.AVATAR;
+      profile.bannerUrl = profile.bannerUrl || PLACEHOLDERS.BANNER;
+      followers.push(profile);
+    }
+  }
 
   return c.json({
     success: true,
-    data: { followers: validFollowers, count: validFollowers.length },
+    data: { followers, count: followers.length },
   });
 });
 
@@ -485,26 +557,47 @@ users.get("/:handle/following", async (c) => {
   const followingResp = await stub.fetch("https://do.internal/following");
   const data = (await followingResp.json()) as { following: string[] };
 
-  const following = await Promise.all(
-    data.following.map(async (followingId: string) => {
-      const followingData = await c.env.USERS_KV.get(`user:${followingId}`);
-      if (followingData) {
-        const authUser =
-          safeJsonParse<import("../types/user").AuthUser>(followingData);
-        if (!authUser) return null;
-        return { id: followingId, handle: authUser.handle };
-      }
-      return null;
-    }),
+  const userKeys = data.following.map((id) => `user:${id}`);
+  const userMap = await batchKVGet(c.env, userKeys, "USERS_KV", {
+    parse: (val) =>
+      val ? safeJsonParse<import("../types/user").AuthUser>(val) : null,
+  });
+
+  const handlesToFetch: string[] = [];
+  const idToHandle = new Map<string, string>();
+  for (const followingId of data.following) {
+    const authUser = userMap.get(`user:${followingId}`);
+    if (authUser?.handle) {
+      handlesToFetch.push(authUser.handle);
+      idToHandle.set(followingId, authUser.handle);
+    }
+  }
+
+  const profileKeys = handlesToFetch.map((h) => `profile:${h}`);
+  const profileMap = await batchKVGet<UserProfile>(
+    c.env,
+    profileKeys,
+    "USERS_KV",
+    {
+      parse: (val) => (val ? safeJsonParse<UserProfile>(val) : null),
+    },
   );
 
-  const validFollowing = following.filter(
-    (f): f is { id: string; handle: string } => f !== null,
-  );
+  const following: UserProfile[] = [];
+  for (const followingId of data.following) {
+    const handle = idToHandle.get(followingId);
+    if (!handle) continue;
+    const profile = profileMap.get(`profile:${handle}`);
+    if (profile) {
+      profile.avatarUrl = profile.avatarUrl || PLACEHOLDERS.AVATAR;
+      profile.bannerUrl = profile.bannerUrl || PLACEHOLDERS.BANNER;
+      following.push(profile);
+    }
+  }
 
   return c.json({
     success: true,
-    data: { following: validFollowing, count: validFollowing.length },
+    data: { following, count: following.length },
   });
 });
 
@@ -665,7 +758,9 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
   const enrichedPosts = await Promise.all(
     posts.slice(0, limit).map(async (post) => {
       if (post.repostOfId && post.originalPost) {
-        const originalPostData = await c.env.POSTS_KV.get(`post:${post.repostOfId}`);
+        const originalPostData = await c.env.POSTS_KV.get(
+          `post:${post.repostOfId}`,
+        );
         if (originalPostData) {
           const freshOriginal = safeJsonParse<PostMetadata>(originalPostData);
           if (freshOriginal) {
@@ -689,7 +784,7 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
         }
       }
       return { ...post, hasLiked: false };
-    })
+    }),
   );
 
   // Return posts without hasLiked status - client can fetch lazily if needed
@@ -700,8 +795,8 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
   return c.json({
     success: true,
     data: {
-      posts: enrichedPosts,
-      cursor: nextCursor,
+      items: enrichedPosts,
+      nextCursor,
       hasMore,
     },
   });
@@ -757,62 +852,9 @@ users.get("/:handle/replies", optionalAuth, async (c) => {
   // Return posts without hasLiked status - client can fetch lazily if needed
   return c.json({
     success: true,
-    data: { posts: posts.slice(0, limit).map(p => ({ ...p, hasLiked: false })) },
-  });
-});
-
-/**
- * GET /api/users/:handle/media - Get user's posts with media
- */
-users.get("/:handle/media", optionalAuth, async (c) => {
-  const handle = normalizeHandle(c.req.param("handle"));
-  const limit = Math.min(
-    parseInt(c.req.query("limit") || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10),
-    LIMITS.MAX_PAGINATION_LIMIT,
-  );
-
-  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
-  if (!userId) {
-    return notFound("User not found");
-  }
-
-  const posts: PostMetadata[] = [];
-  let postCursor: string | undefined;
-
-  while (posts.length < limit) {
-    const listResult = await c.env.POSTS_KV.list({
-      prefix: "post:",
-      limit: BATCH_SIZE.KV_LIST,
-      cursor: postCursor ?? null,
-    });
-
-    for (const key of listResult.keys) {
-      if (posts.length >= limit) break;
-      const postData = await c.env.POSTS_KV.get(key.name);
-      if (!postData) continue;
-      const post = safeJsonParse<PostMetadata>(postData);
-      if (!post) continue;
-      if (
-        post.authorId === userId &&
-        !post.isDeleted &&
-        !post.isTakenDown &&
-        post.mediaUrls &&
-        post.mediaUrls.length > 0
-      ) {
-        posts.push(post);
-      }
-    }
-
-    if (listResult.list_complete) break;
-    postCursor = listResult.cursor;
-  }
-
-  posts.sort((a, b) => b.createdAt - a.createdAt);
-
-  // Return posts without hasLiked status - client can fetch lazily if needed
-  return c.json({
-    success: true,
-    data: { posts: posts.slice(0, limit).map(p => ({ ...p, hasLiked: false })) },
+    data: {
+      items: posts.slice(0, limit).map((p) => ({ ...p, hasLiked: false })),
+    },
   });
 });
 
@@ -836,7 +878,9 @@ users.get("/:handle/likes", async (c) => {
     // Get liked post IDs from UserDO (single subrequest)
     const userDoId = c.env.USER_DO.idFromName(userId);
     const userStub = c.env.USER_DO.get(userDoId);
-    const likedResp = await userStub.fetch(`https://do.internal/liked-posts?limit=${limit}`);
+    const likedResp = await userStub.fetch(
+      `https://do.internal/liked-posts?limit=${limit}`,
+    );
     const { likedPosts } = (await likedResp.json()) as { likedPosts: string[] };
 
     // Fetch post data from KV (already ordered by recency from UserDO)
@@ -846,7 +890,9 @@ users.get("/:handle/likes", async (c) => {
       if (!postData) continue;
       const post = safeJsonParse<PostMetadata>(postData);
       if (!post || post.isDeleted || post.isTakenDown) continue;
-      posts.push({ ...post, hasLiked: true } as PostMetadata & { hasLiked: boolean });
+      posts.push({ ...post, hasLiked: true } as PostMetadata & {
+        hasLiked: boolean;
+      });
       if (posts.length >= limit) break;
     }
 
@@ -856,10 +902,13 @@ users.get("/:handle/likes", async (c) => {
     });
   } catch (error) {
     console.error("Error fetching likes:", error);
-    return c.json({
-      success: false,
-      error: "Error fetching likes",
-    }, 500);
+    return c.json(
+      {
+        success: false,
+        error: "Error fetching likes",
+      },
+      500,
+    );
   }
 });
 

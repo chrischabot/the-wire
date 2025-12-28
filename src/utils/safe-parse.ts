@@ -40,18 +40,6 @@ export function safeAtob(encoded: string | null | undefined): string | null {
 }
 
 /**
- * Safely encode to base64, returning null on failure
- */
-export function safeBtoa(data: string | null | undefined): string | null {
-  if (!data) return null;
-  try {
-    return btoa(data);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Parse cursor string (base64 encoded JSON) safely
  */
 export function safeParseCursor<T = { offset: number }>(
@@ -59,17 +47,4 @@ export function safeParseCursor<T = { offset: number }>(
 ): T | null {
   const decoded = safeAtob(cursor);
   return safeJsonParse<T>(decoded);
-}
-
-/**
- * Create cursor string safely
- */
-export function safeCreateCursor(
-  data: { offset: number } | Record<string, unknown>,
-): string {
-  try {
-    return btoa(JSON.stringify(data));
-  } catch {
-    return btoa(JSON.stringify({ offset: 0 }));
-  }
 }

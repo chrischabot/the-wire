@@ -9,18 +9,9 @@ import type {
   CreateNotificationRequest,
 } from "../types/notification";
 import { generateId } from "./snowflake";
-import {
-  detectMentions as detectMentionsUtil,
-} from "../shared/utils";
+import { detectMentions } from "../shared/utils";
 import { safeJsonParse, safeAtob } from "../utils/safe-parse";
-
-/**
- * Detect @mentions in content
- * Returns array of mentioned handles (without @)
- */
-export function detectMentions(content: string): string[] {
-  return detectMentionsUtil(content);
-}
+import { batchKVGet } from "../utils/batch";
 
 /**
  * Create a notification
@@ -193,19 +184,28 @@ export async function getUserNotifications(
 
   const paginatedIds = notifIds.slice(startIndex, startIndex + limit);
 
-  // Fetch notification details
+  const allKvKeys = notifIds.map((id) => `notifications:${userId}:${id}`);
+  const allNotifMap = await batchKVGet<Notification>(
+    env,
+    allKvKeys,
+    "SESSIONS_KV",
+    {
+      parse: (val) => (val ? safeJsonParse<Notification>(val) : null),
+    },
+  );
+
   const notifications: Notification[] = [];
   let unreadCount = 0;
 
-  for (const notifId of paginatedIds) {
-    const notifKey = `notifications:${userId}:${notifId}`;
-    const notifData = await env.SESSIONS_KV.get(notifKey);
+  for (const notifId of notifIds) {
+    const notif = allNotifMap.get(`notifications:${userId}:${notifId}`);
+    if (notif && !notif.read) unreadCount++;
+  }
 
-    if (notifData) {
-      const notif = safeJsonParse<Notification>(notifData);
-      if (!notif) continue;
+  for (const notifId of paginatedIds) {
+    const notif = allNotifMap.get(`notifications:${userId}:${notifId}`);
+    if (notif) {
       notifications.push(notif);
-      if (!notif.read) unreadCount++;
     }
   }
 
@@ -260,12 +260,28 @@ export async function markAllNotificationsRead(
   const notifIds = safeJsonParse<string[]>(notifList);
   if (!notifIds) return 0;
 
+  const kvKeys = notifIds.map((id) => `notifications:${userId}:${id}`);
+  const notifMap = await batchKVGet<Notification>(env, kvKeys, "SESSIONS_KV", {
+    parse: (val) => (val ? safeJsonParse<Notification>(val) : null),
+  });
+
   let markedCount = 0;
+  const writePromises: Promise<void>[] = [];
 
   for (const notifId of notifIds) {
-    const success = await markNotificationRead(env, userId, notifId);
-    if (success) markedCount++;
+    const key = `notifications:${userId}:${notifId}`;
+    const notif = notifMap.get(key);
+    if (notif && !notif.read) {
+      notif.read = true;
+      writePromises.push(
+        env.SESSIONS_KV.put(key, JSON.stringify(notif), {
+          expirationTtl: 30 * 24 * 60 * 60,
+        }),
+      );
+      markedCount++;
+    }
   }
 
+  await Promise.all(writePromises);
   return markedCount;
 }

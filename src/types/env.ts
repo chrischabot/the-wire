@@ -30,6 +30,9 @@ export interface Env {
   // Queues
   FANOUT_QUEUE: Queue;
 
+  // Static Assets
+  ASSETS: Fetcher;
+
   // Environment Variables
   ENVIRONMENT: string;
   JWT_SECRET?: string;

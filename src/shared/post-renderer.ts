@@ -436,7 +436,7 @@ export function getPostCardRendererScript(config: PostRenderConfig): string {
 
       const displayAvatarHtml = displayPost.authorAvatarUrl
         ? '<img src="' + displayPost.authorAvatarUrl + '" class="avatar media-zoomable" data-fullsrc="' + displayPost.authorAvatarUrl + '" data-zoomable="true" alt="' + escapeHtml(displayPost.authorDisplayName) + '" role="button" tabindex="0" onclick="event.stopPropagation()">'
-        : '<div class="avatar" style="background: #1D9BF0;"></div>';
+        : '<div class="avatar" style="background: var(--primary);"></div>';
 
       // Check ownership
       const currentHandle = postConfig.currentUserHandle.toLowerCase();

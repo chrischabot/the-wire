@@ -6,6 +6,7 @@ export function getLandingPage(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Wire - Share Notes Globally</title>
+  <script>if(localStorage.getItem('auth_token'))window.location.replace('/home');</script>
   <link rel="stylesheet" href="/css/styles.css?v=2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

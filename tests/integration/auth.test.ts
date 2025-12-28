@@ -1,17 +1,19 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import app from '../../src/index';
+import { describe, it, expect, beforeEach } from "vitest";
+import { app } from "../../src/index";
+import type {
+  DurableObjectId,
+  DurableObjectStub,
+} from "@cloudflare/workers-types";
 
-// Mock environment with KV
 const createMockEnv = () => {
   const kvStore = new Map<string, string>();
-  const doStore = new Map<string, any>();
-  
+
   return {
-    ENVIRONMENT: 'test',
-    JWT_SECRET: 'test-secret-key-for-integration-tests',
-    JWT_EXPIRY_HOURS: '24',
-    MAX_NOTE_LENGTH: '280',
-    FEED_PAGE_SIZE: '20',
+    ENVIRONMENT: "test",
+    JWT_SECRET: "test-secret-key-for-integration-tests",
+    JWT_EXPIRY_HOURS: "24",
+    MAX_NOTE_LENGTH: "280",
+    FEED_PAGE_SIZE: "20",
     USERS_KV: {
       get: async (key: string) => kvStore.get(key) || null,
       put: async (key: string, value: string) => {
@@ -31,62 +33,63 @@ const createMockEnv = () => {
       },
     },
     USER_DO: {
-      idFromName: (name: string) => ({} as DurableObjectId),
-      get: (id: DurableObjectId) => ({
-        fetch: async (url: string | Request, init?: RequestInit) => {
-          return new Response(JSON.stringify({ success: true }), {
-            headers: { 'Content-Type': 'application/json' },
-          });
-        },
-      } as DurableObjectStub),
+      idFromName: (name: string) => ({}) as unknown as DurableObjectId,
+      get: (id: DurableObjectId) =>
+        ({
+          fetch: async (url: string | Request, init?: RequestInit) => {
+            return new Response(JSON.stringify({ success: true }), {
+              headers: { "Content-Type": "application/json" },
+            });
+          },
+        }) as unknown as DurableObjectStub,
     },
   };
 };
 
-describe('Auth API', () => {
+describe("Auth API", () => {
   let mockEnv: ReturnType<typeof createMockEnv>;
 
   beforeEach(() => {
     mockEnv = createMockEnv();
   });
 
-  describe('POST /api/auth/signup', () => {
-    it('should create a new user', async () => {
+  describe("POST /api/auth/signup", () => {
+    it("should create a new user", async () => {
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'test@example.com',
-            password: 'SecurePass123',
-            handle: 'testuser',
+            email: "test@example.com",
+            password: "SecurePass123",
+            handle: "testuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.success).toBe(true);
-      expect(body.data.user.email).toBe('test@example.com');
-      expect(body.data.user.handle).toBe('testuser');
+      expect(body.data.user.email).toBe("test@example.com");
+      expect(body.data.user.handle).toBe("testuser");
       expect(body.data.token).toBeTruthy();
     });
 
-    it('should reject invalid email', async () => {
+    it("should reject invalid email", async () => {
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'invalid-email',
-            password: 'SecurePass123',
-            handle: 'testuser',
+            email: "invalid-email",
+            password: "SecurePass123",
+            handle: "testuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(400);
@@ -94,19 +97,19 @@ describe('Auth API', () => {
       expect(body.success).toBe(false);
     });
 
-    it('should reject weak password', async () => {
+    it("should reject weak password", async () => {
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'test@example.com',
-            password: 'weak',
-            handle: 'testuser',
+            email: "test@example.com",
+            password: "weak",
+            handle: "testuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(400);
@@ -114,109 +117,109 @@ describe('Auth API', () => {
       expect(body.success).toBe(false);
     });
 
-    it('should reject duplicate email', async () => {
+    it("should reject duplicate email", async () => {
       // First signup
       await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'test@example.com',
-            password: 'SecurePass123',
-            handle: 'testuser1',
+            email: "test@example.com",
+            password: "SecurePass123",
+            handle: "testuser1",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       // Second signup with same email
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'test@example.com',
-            password: 'SecurePass123',
-            handle: 'testuser2',
+            email: "test@example.com",
+            password: "SecurePass123",
+            handle: "testuser2",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(409);
       const body = await res.json();
-      expect(body.error).toContain('Email already registered');
+      expect(body.error).toContain("Email already registered");
     });
 
-    it('should reject duplicate handle', async () => {
+    it("should reject duplicate handle", async () => {
       // First signup
       await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'test1@example.com',
-            password: 'SecurePass123',
-            handle: 'testuser',
+            email: "test1@example.com",
+            password: "SecurePass123",
+            handle: "testuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       // Second signup with same handle
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'test2@example.com',
-            password: 'SecurePass123',
-            handle: 'testuser',
+            email: "test2@example.com",
+            password: "SecurePass123",
+            handle: "testuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(409);
       const body = await res.json();
-      expect(body.error).toContain('Handle already taken');
+      expect(body.error).toContain("Handle already taken");
     });
   });
 
-  describe('POST /api/auth/login', () => {
+  describe("POST /api/auth/login", () => {
     beforeEach(async () => {
       // Create a test user
       await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'login@example.com',
-            password: 'SecurePass123',
-            handle: 'loginuser',
+            email: "login@example.com",
+            password: "SecurePass123",
+            handle: "loginuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
     });
 
-    it('should login with valid credentials', async () => {
+    it("should login with valid credentials", async () => {
       const res = await app.request(
-        '/api/auth/login',
+        "/api/auth/login",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'login@example.com',
-            password: 'SecurePass123',
+            email: "login@example.com",
+            password: "SecurePass123",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(200);
@@ -225,18 +228,18 @@ describe('Auth API', () => {
       expect(body.data.token).toBeTruthy();
     });
 
-    it('should reject invalid password', async () => {
+    it("should reject invalid password", async () => {
       const res = await app.request(
-        '/api/auth/login',
+        "/api/auth/login",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'login@example.com',
-            password: 'WrongPassword123',
+            email: "login@example.com",
+            password: "WrongPassword123",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(401);
@@ -244,109 +247,109 @@ describe('Auth API', () => {
       expect(body.success).toBe(false);
     });
 
-    it('should reject non-existent user', async () => {
+    it("should reject non-existent user", async () => {
       const res = await app.request(
-        '/api/auth/login',
+        "/api/auth/login",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'nonexistent@example.com',
-            password: 'SecurePass123',
+            email: "nonexistent@example.com",
+            password: "SecurePass123",
           }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(401);
     });
   });
 
-  describe('GET /api/auth/me', () => {
+  describe("GET /api/auth/me", () => {
     let authToken: string;
 
     beforeEach(async () => {
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'me@example.com',
-            password: 'SecurePass123',
-            handle: 'meuser',
+            email: "me@example.com",
+            password: "SecurePass123",
+            handle: "meuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
       const body = await res.json();
       authToken = body.data.token;
     });
 
-    it('should return user info with valid token', async () => {
+    it("should return user info with valid token", async () => {
       const res = await app.request(
-        '/api/auth/me',
+        "/api/auth/me",
         {
           headers: { Authorization: `Bearer ${authToken}` },
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.success).toBe(true);
-      expect(body.data.email).toBe('me@example.com');
-      expect(body.data.handle).toBe('meuser');
+      expect(body.data.email).toBe("me@example.com");
+      expect(body.data.handle).toBe("meuser");
     });
 
-    it('should reject request without token', async () => {
-      const res = await app.request('/api/auth/me', {}, mockEnv);
+    it("should reject request without token", async () => {
+      const res = await app.request("/api/auth/me", {}, mockEnv);
 
       expect(res.status).toBe(401);
     });
 
-    it('should reject request with invalid token', async () => {
+    it("should reject request with invalid token", async () => {
       const res = await app.request(
-        '/api/auth/me',
+        "/api/auth/me",
         {
-          headers: { Authorization: 'Bearer invalid-token' },
+          headers: { Authorization: "Bearer invalid-token" },
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(401);
     });
   });
 
-  describe('POST /api/auth/refresh', () => {
+  describe("POST /api/auth/refresh", () => {
     let authToken: string;
 
     beforeEach(async () => {
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'refresh@example.com',
-            password: 'SecurePass123',
-            handle: 'refreshuser',
+            email: "refresh@example.com",
+            password: "SecurePass123",
+            handle: "refreshuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
       const body = await res.json();
       authToken = body.data.token;
     });
 
-    it('should return a new token', async () => {
+    it("should return a new token", async () => {
       const res = await app.request(
-        '/api/auth/refresh',
+        "/api/auth/refresh",
         {
-          method: 'POST',
+          method: "POST",
           headers: { Authorization: `Bearer ${authToken}` },
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(200);
@@ -357,35 +360,35 @@ describe('Auth API', () => {
     });
   });
 
-  describe('POST /api/auth/logout', () => {
+  describe("POST /api/auth/logout", () => {
     let authToken: string;
 
     beforeEach(async () => {
       const res = await app.request(
-        '/api/auth/signup',
+        "/api/auth/signup",
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: 'logout@example.com',
-            password: 'SecurePass123',
-            handle: 'logoutuser',
+            email: "logout@example.com",
+            password: "SecurePass123",
+            handle: "logoutuser",
           }),
         },
-        mockEnv
+        mockEnv,
       );
       const body = await res.json();
       authToken = body.data.token;
     });
 
-    it('should logout successfully', async () => {
+    it("should logout successfully", async () => {
       const res = await app.request(
-        '/api/auth/logout',
+        "/api/auth/logout",
         {
-          method: 'POST',
+          method: "POST",
           headers: { Authorization: `Bearer ${authToken}` },
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(200);

@@ -16,6 +16,7 @@ import { getFoFRankedPosts } from "./scheduled";
 import { LIMITS, BATCH_SIZE, SCORING } from "../constants";
 import { safeJsonParse, safeAtob } from "../utils/safe-parse";
 import { success, serverError } from "../utils/response";
+import { batchKVGet } from "../utils/batch";
 
 const feed = new Hono<{ Bindings: Env }>();
 
@@ -104,13 +105,11 @@ feed.get("/home", requireAuth, async (c) => {
       if (blockedSet.has(post.authorId)) continue;
       if (post.isDeleted || post.isTakenDown) continue;
 
-      const contentForFilter =
-        post.content || post.originalPost?.content || "";
+      const contentForFilter = post.content || post.originalPost?.content || "";
       if (contentForFilter && isMutedContent(contentForFilter, post.authorId)) {
         continue;
       }
 
-      if (isLowValueRepost(post)) continue;
       if (post.repostOfId) {
         if (seenOriginalIds.has(post.repostOfId)) continue;
         seenOriginalIds.add(post.repostOfId);
@@ -144,10 +143,12 @@ feed.get("/home", requireAuth, async (c) => {
           if (post.authorId === userId) continue;
           const contentForFilter =
             post.content || post.originalPost?.content || "";
-          if (contentForFilter && isMutedContent(contentForFilter, post.authorId)) {
+          if (
+            contentForFilter &&
+            isMutedContent(contentForFilter, post.authorId)
+          ) {
             continue;
           }
-          if (isLowValueRepost(post)) continue;
           if (post.repostOfId) {
             if (seenOriginalIds.has(post.repostOfId)) continue;
             seenOriginalIds.add(post.repostOfId);
@@ -166,30 +167,76 @@ feed.get("/home", requireAuth, async (c) => {
           );
         }
       }
+
+      if (explorePosts.length > 0) {
+        const allExploreIds = new Set<string>();
+        for (const p of explorePosts) {
+          allExploreIds.add(p.id);
+          if (p.repostOfId) allExploreIds.add(p.repostOfId);
+        }
+        const freshExploreMap = await batchKVGet<PostMetadata>(
+          c.env,
+          [...allExploreIds].map((id) => `post:${id}`),
+          "POSTS_KV",
+          { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+        );
+        explorePosts = explorePosts.map((cached) => {
+          const fresh = freshExploreMap.get(`post:${cached.id}`);
+          const result = fresh
+            ? {
+                ...fresh,
+                source: cached.source,
+                hasLiked: false,
+                hasReposted: false,
+              }
+            : cached;
+          if (result.repostOfId && result.originalPost) {
+            const freshOrig = freshExploreMap.get(`post:${result.repostOfId}`);
+            if (freshOrig) {
+              result.originalPost = {
+                ...result.originalPost,
+                likeCount: freshOrig.likeCount,
+                replyCount: freshOrig.replyCount,
+                repostCount: freshOrig.repostCount,
+              };
+            }
+          }
+          return result;
+        });
+      }
     }
 
-    // Backfill: pull recent posts from underrepresented followees
+    // Backfill: pull recent posts from followed users when FeedDO is empty/sparse
     const uniqueAuthors = new Set(followedPosts.map((post) => post.authorId));
     const followeeIds = [...followingSet].filter(
       (id) => id !== userId && !blockedSet.has(id),
     );
+
+    // AGGRESSIVE BACKFILL: If FeedDO returned very few posts, fetch directly from followed users
+    const feedIsEmpty = followedPosts.length < limit / 2;
+    const postsPerAuthor = feedIsEmpty ? 5 : 1;
+    const maxAuthorsToBackfill = feedIsEmpty
+      ? Math.min(20, followeeIds.length)
+      : 8;
+
     const targetUniqueAuthors = Math.min(
       followeeIds.length,
       Math.max(6, Math.floor(limit / 3)),
     );
 
-    if (uniqueAuthors.size < targetUniqueAuthors && followeeIds.length > 0) {
-      const missingAuthors = followeeIds.filter(
-        (id) => !uniqueAuthors.has(id),
-      );
+    if (
+      (feedIsEmpty || uniqueAuthors.size < targetUniqueAuthors) &&
+      followeeIds.length > 0
+    ) {
+      const missingAuthors = followeeIds.filter((id) => !uniqueAuthors.has(id));
+      const authorsToProcess = feedIsEmpty ? followeeIds : missingAuthors;
       const maxBackfill = Math.min(
-        8,
-        targetUniqueAuthors - uniqueAuthors.size,
-        missingAuthors.length,
+        maxAuthorsToBackfill,
+        authorsToProcess.length,
       );
 
       if (maxBackfill > 0) {
-        const backfillAuthors = missingAuthors.slice(0, maxBackfill);
+        const backfillAuthors = authorsToProcess.slice(0, maxBackfill);
         const backfillIndexes = await Promise.all(
           backfillAuthors.map((authorId) =>
             c.env.POSTS_KV.get(`user-posts:${authorId}`),
@@ -202,9 +249,14 @@ feed.get("/home", requireAuth, async (c) => {
           const indexData = backfillIndexes[i];
           if (!indexData) continue;
           const postIds = safeJsonParse<string[]>(indexData) || [];
-          const postId = postIds.find((id) => !seenPostIds.has(id));
-          if (!postId) continue;
-          backfillPostIds.push({ authorId, postId });
+          let addedForAuthor = 0;
+          for (const postId of postIds) {
+            if (addedForAuthor >= postsPerAuthor) break;
+            if (seenPostIds.has(postId)) continue;
+            backfillPostIds.push({ authorId, postId });
+            seenPostIds.add(postId);
+            addedForAuthor++;
+          }
         }
 
         const backfillPostsData = await Promise.all(
@@ -223,15 +275,16 @@ feed.get("/home", requireAuth, async (c) => {
 
           const contentForFilter =
             post.content || post.originalPost?.content || "";
-          if (contentForFilter && isMutedContent(contentForFilter, post.authorId)) {
+          if (
+            contentForFilter &&
+            isMutedContent(contentForFilter, post.authorId)
+          ) {
             continue;
           }
-          if (isLowValueRepost(post)) continue;
           if (post.repostOfId) {
             if (seenOriginalIds.has(post.repostOfId)) continue;
             seenOriginalIds.add(post.repostOfId);
           }
-          if (seenPostIds.has(post.id)) continue;
 
           followedPosts.push({
             ...post,
@@ -239,7 +292,6 @@ feed.get("/home", requireAuth, async (c) => {
             hasLiked: false,
             hasReposted: false,
           });
-          seenPostIds.add(post.id);
           uniqueAuthors.add(post.authorId);
           authorFrequency.set(
             post.authorId,
@@ -249,28 +301,129 @@ feed.get("/home", requireAuth, async (c) => {
       }
     }
 
-    const candidates = [...followedPosts, ...explorePosts];
     const now = Date.now();
-    const scoredCandidates = candidates
+
+    const pinnedPosts: FeedPost[] = [];
+    const remainingFollowPosts: FeedPost[] = [];
+    for (const post of followedPosts) {
+      if (
+        post.source === "own" &&
+        now - post.createdAt < SCORING.OWN_POST_PIN_THRESHOLD_MS
+      ) {
+        pinnedPosts.push(post);
+      } else {
+        remainingFollowPosts.push(post);
+      }
+    }
+
+    const recentFollowCount = remainingFollowPosts.filter(
+      (p) =>
+        now - p.createdAt < SCORING.STALE_FEED_RECENT_HOURS * 60 * 60 * 1000,
+    ).length;
+    const isStale =
+      recentFollowCount <
+      Math.ceil(limit * SCORING.STALE_FEED_MIN_RECENT_RATIO);
+    const followRatio = isStale
+      ? SCORING.FOLLOW_RATIO_STALE
+      : SCORING.FOLLOW_RATIO_NORMAL;
+
+    const scoredFollow = remainingFollowPosts
+      .map((post) => ({
+        post,
+        score: scoreFeedPost(post, authorFrequency, now),
+      }))
+      .sort((a, b) => b.score - a.score);
+    const scoredExplore = explorePosts
       .map((post) => ({
         post,
         score: scoreFeedPost(post, authorFrequency, now),
       }))
       .sort((a, b) => b.score - a.score);
 
+    const availableSlots = limit - pinnedPosts.length;
+    const followQuota = Math.ceil(availableSlots * followRatio);
+    const exploreQuota = availableSlots - followQuota;
+
     const maxPerAuthorTotal = Math.max(
       2,
       Math.ceil(limit / Math.max(1, targetUniqueAuthors)),
     );
-    const selectedPosts = selectDiversePosts(scoredCandidates, limit, {
+    const selectedFollow = selectDiversePosts(scoredFollow, followQuota, {
+      windowSize: 5,
+      maxPerAuthorInWindow: 1,
+      maxPerAuthorTotal,
+    });
+    const selectedExplore = selectDiversePosts(scoredExplore, exploreQuota, {
       windowSize: 5,
       maxPerAuthorInWindow: 1,
       maxPerAuthorTotal,
     });
 
+    const interleaved: FeedPost[] = [];
+    let fIdx = 0,
+      eIdx = 0;
+    while (
+      interleaved.length < availableSlots &&
+      (fIdx < selectedFollow.length || eIdx < selectedExplore.length)
+    ) {
+      for (
+        let i = 0;
+        i < 3 &&
+        fIdx < selectedFollow.length &&
+        interleaved.length < availableSlots;
+        i++
+      ) {
+        interleaved.push(selectedFollow[fIdx++]!);
+      }
+      if (
+        eIdx < selectedExplore.length &&
+        interleaved.length < availableSlots
+      ) {
+        interleaved.push(selectedExplore[eIdx++]!);
+      }
+    }
+
+    const finalPosts = [...pinnedPosts, ...interleaved];
+
+    const repostOriginalIds = finalPosts
+      .filter((p) => p.repostOfId && p.originalPost)
+      .map((p) => p.repostOfId!);
+
+    if (repostOriginalIds.length > 0) {
+      const originalKeys = repostOriginalIds.map((id) => `post:${id}`);
+      const originalMap = await batchKVGet<PostMetadata>(
+        c.env,
+        originalKeys,
+        "POSTS_KV",
+        { parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null) },
+      );
+
+      for (const post of finalPosts) {
+        if (post.repostOfId && post.originalPost) {
+          const fresh = originalMap.get(`post:${post.repostOfId}`);
+          if (fresh) {
+            post.originalPost = {
+              ...post.originalPost,
+              likeCount: fresh.likeCount,
+              replyCount: fresh.replyCount,
+              repostCount: fresh.repostCount,
+            };
+          }
+        }
+      }
+    }
+
+    if (finalPosts.length === 0 && explorePosts.length > 0) {
+      return success({
+        items: explorePosts.slice(0, limit),
+        nextCursor: null,
+        hasMore: false,
+      });
+    }
+
     return success({
-      posts: selectedPosts,
-      cursor: feedData.cursor,
+      items: finalPosts,
+      nextCursor: feedData.cursor,
       hasMore: feedData.hasMore || explorePosts.length > 0,
     });
   } catch (error) {
@@ -279,40 +432,48 @@ feed.get("/home", requireAuth, async (c) => {
   }
 });
 
-/**
- * Score feed posts for ranking
- */
+const LN2 = Math.log(2);
+
 function scoreFeedPost(
   post: FeedPost,
   authorFrequency: Map<string, number>,
   now: number,
 ): number {
-  const ageHours = Math.max(0, (now - post.createdAt) / (1000 * 60 * 60));
+  const ageMs = now - post.createdAt;
+  const ageHours = ageMs / 3_600_000;
+  const ageMin = ageMs / 60_000;
+
+  const recency = Math.exp((-LN2 * ageHours) / SCORING.RECENCY_HALF_LIFE_HOURS);
+
   const engagement =
     (post.likeCount || 0) * SCORING.LIKE_WEIGHT +
     (post.replyCount || 0) * SCORING.REPLY_WEIGHT +
     (post.repostCount || 0) * SCORING.REPOST_WEIGHT +
     (post.quoteCount || 0) * SCORING.REPOST_WEIGHT;
+  const engScore = Math.log1p(engagement);
+  const engDecay = Math.exp(
+    (-LN2 * ageHours) / SCORING.ENGAGEMENT_HALF_LIFE_HOURS,
+  );
 
-  const hnScore =
-    engagement /
-    Math.pow(ageHours + SCORING.HN_BASE_OFFSET, SCORING.HN_AGING_EXPONENT);
-  const engagementScore = Math.log10(engagement + 1);
-  const recencyScore = 1 / (1 + ageHours / 8);
+  const freshBoost =
+    post.source === "own"
+      ? SCORING.FRESH_BOOST_OWN *
+        Math.exp(-ageMin / SCORING.FRESH_BOOST_DECAY_MINUTES_OWN)
+      : post.source === "follow"
+        ? SCORING.FRESH_BOOST_FOLLOW *
+          Math.exp(-ageMin / SCORING.FRESH_BOOST_DECAY_MINUTES_FOLLOW)
+        : SCORING.FRESH_BOOST_EXPLORE *
+          Math.exp(-ageMin / SCORING.FRESH_BOOST_DECAY_MINUTES_FOLLOW);
 
-  const sourceBoost =
-    post.source === "own" ? 0.2 : post.source === "follow" ? 0.1 : 0;
-  const emptyRepostPenalty =
-    post.repostOfId && !post.content?.trim() ? 0.4 : 0;
+  const emptyRepostPenalty = post.repostOfId && !post.content?.trim() ? 10 : 0;
 
   const frequency = authorFrequency.get(post.authorId) || 1;
-  const frequencyPenalty = Math.min(0.6, (frequency - 1) * 0.05);
+  const frequencyPenalty = Math.min(15, (frequency - 1) * 2);
 
   return (
-    hnScore * 4 +
-    engagementScore * 2 +
-    recencyScore +
-    sourceBoost -
+    SCORING.RECENCY_WEIGHT * recency +
+    SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay +
+    freshBoost -
     emptyRepostPenalty -
     frequencyPenalty
   );
@@ -342,7 +503,10 @@ function selectDiversePosts(
     const total = totalCounts.get(authorId) || 0;
     const recent = recentCounts.get(authorId) || 0;
 
-    if (total >= options.maxPerAuthorTotal || recent >= options.maxPerAuthorInWindow) {
+    if (
+      total >= options.maxPerAuthorTotal ||
+      recent >= options.maxPerAuthorInWindow
+    ) {
       skipped.push(item);
       continue;
     }
@@ -379,9 +543,10 @@ function selectDiversePosts(
 /**
  * Build a single muted-words matcher for fast checks
  */
-function splitMutedWords(
-  mutedWords: Array<string | MutedWordEntry>,
-): { all: string[]; notFollowing: string[] } {
+function splitMutedWords(mutedWords: Array<string | MutedWordEntry>): {
+  all: string[];
+  notFollowing: string[];
+} {
   const all = new Set<string>();
   const notFollowing = new Set<string>();
   const now = Date.now();
@@ -394,7 +559,9 @@ function splitMutedWords(
     }
 
     if (!entry || typeof entry !== "object") continue;
-    const word = String(entry.word || "").trim().toLowerCase();
+    const word = String(entry.word || "")
+      .trim()
+      .toLowerCase();
     if (!word) continue;
     if (entry.expiresAt && entry.expiresAt <= now) continue;
     if (entry.scope === "not_following") {
@@ -417,20 +584,6 @@ function buildMutedWordMatcher(
   if (escaped.length === 0) return null;
   const regex = new RegExp(`\\b(${escaped.join("|")})\\b`, "i");
   return (content: string) => regex.test(content);
-}
-
-/**
- * Skip empty reposts with zero engagement
- */
-function isLowValueRepost(post: PostMetadata): boolean {
-  if (!post.repostOfId) return false;
-  if ((post.content || "").trim().length > 0) return false;
-  const engagement =
-    (post.likeCount || 0) +
-    (post.replyCount || 0) +
-    (post.repostCount || 0) +
-    (post.quoteCount || 0);
-  return engagement === 0;
 }
 
 /**
@@ -465,8 +618,9 @@ feed.get("/home-legacy", requireAuth, async (c) => {
     };
 
     const blockedUserIds = blockedData.blocked || [];
-    const { all: mutedAll, notFollowing: mutedNotFollowing } =
-      splitMutedWords(settingsData.mutedWords || []);
+    const { all: mutedAll, notFollowing: mutedNotFollowing } = splitMutedWords(
+      settingsData.mutedWords || [],
+    );
     const followingIds = followingData.following || [];
 
     // Get feed entries from FeedDO (posts from followed users)
@@ -772,7 +926,10 @@ feed.get("/home-legacy", requireAuth, async (c) => {
     const postsWithInteractionStatus = await Promise.all(
       mergedPosts.map(async (post, index) => {
         // For reposts, always fetch fresh original post data (just KV, no DO call)
-        let enrichedPost: typeof post & { hasLiked: boolean; hasReposted: boolean } = {
+        let enrichedPost: typeof post & {
+          hasLiked: boolean;
+          hasReposted: boolean;
+        } = {
           ...post,
           hasLiked: false,
           hasReposted: false,
@@ -808,7 +965,9 @@ feed.get("/home-legacy", requireAuth, async (c) => {
           try {
             const [likedResp, repostedResp] = await Promise.all([
               postStub.fetch(`https://do.internal/has-liked?userId=${userId}`),
-              postStub.fetch(`https://do.internal/has-reposted?userId=${userId}`),
+              postStub.fetch(
+                `https://do.internal/has-reposted?userId=${userId}`,
+              ),
             ]);
             const likedData = (await likedResp.json()) as { hasLiked: boolean };
             const repostedData = (await repostedResp.json()) as {
@@ -826,8 +985,8 @@ feed.get("/home-legacy", requireAuth, async (c) => {
     );
 
     return success({
-      posts: postsWithInteractionStatus,
-      cursor: feedData.cursor,
+      items: postsWithInteractionStatus,
+      nextCursor: feedData.cursor,
       hasMore: feedData.hasMore || filteredFofPosts.length > 0,
     });
   } catch (error) {
@@ -836,18 +995,20 @@ feed.get("/home-legacy", requireAuth, async (c) => {
   }
 });
 
-/**
- * Calculate Hacker News style score for a post
- */
 function calculateHNScore(post: PostMetadata): number {
   const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
-  const points =
+  const recency = Math.exp((-LN2 * ageHours) / SCORING.RECENCY_HALF_LIFE_HOURS);
+  const engagement =
     post.likeCount * SCORING.LIKE_WEIGHT +
     post.replyCount * SCORING.REPLY_WEIGHT +
     post.repostCount * SCORING.REPOST_WEIGHT;
+  const engScore = Math.log1p(engagement);
+  const engDecay = Math.exp(
+    (-LN2 * ageHours) / SCORING.ENGAGEMENT_HALF_LIFE_HOURS,
+  );
   return (
-    points /
-    Math.pow(ageHours + SCORING.HN_BASE_OFFSET, SCORING.HN_AGING_EXPONENT)
+    SCORING.RECENCY_WEIGHT * recency +
+    SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay
   );
 }
 
@@ -960,14 +1121,42 @@ feed.get("/global", async (c) => {
       }
       cachedPosts = cachedPosts.filter((p) => !p.isDeleted && !p.isTakenDown);
 
-      // Paginate
-      const paginatedPosts = cachedPosts.slice(offset, offset + limit);
+      const paginatedCached = cachedPosts.slice(offset, offset + limit);
       const hasMore = offset + limit < cachedPosts.length;
       const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
 
+      const allIds = new Set<string>();
+      for (const p of paginatedCached) {
+        allIds.add(p.id);
+        if (p.repostOfId) allIds.add(p.repostOfId);
+      }
+
+      const freshMap = await batchKVGet<PostMetadata>(
+        c.env,
+        [...allIds].map((id) => `post:${id}`),
+        "POSTS_KV",
+        { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+      );
+
+      const paginatedPosts = paginatedCached.map((cached) => {
+        const fresh = freshMap.get(`post:${cached.id}`) || cached;
+        if (fresh.repostOfId && fresh.originalPost) {
+          const freshOriginal = freshMap.get(`post:${fresh.repostOfId}`);
+          if (freshOriginal) {
+            fresh.originalPost = {
+              ...fresh.originalPost,
+              likeCount: freshOriginal.likeCount,
+              replyCount: freshOriginal.replyCount,
+              repostCount: freshOriginal.repostCount,
+            };
+          }
+        }
+        return fresh;
+      });
+
       return success({
-        posts: paginatedPosts,
-        cursor: nextCursor,
+        items: paginatedPosts,
+        nextCursor,
         hasMore,
       });
     }
@@ -1014,9 +1203,32 @@ feed.get("/global", async (c) => {
     const hasMore = offset + limit < diversePosts.length;
     const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
 
+    const repostOriginalIds = paginatedPosts
+      .filter((p) => p.repostOfId && p.originalPost)
+      .map((p) => p.repostOfId!);
+
+    if (repostOriginalIds.length > 0) {
+      const origMap = await batchKVGet<PostMetadata>(
+        c.env,
+        repostOriginalIds.map((id) => `post:${id}`),
+        "POSTS_KV",
+        { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+      );
+      for (const post of paginatedPosts) {
+        if (post.repostOfId && post.originalPost) {
+          const freshOrig = origMap.get(`post:${post.repostOfId}`);
+          if (freshOrig) {
+            post.originalPost.likeCount = freshOrig.likeCount;
+            post.originalPost.replyCount = freshOrig.replyCount;
+            post.originalPost.repostCount = freshOrig.repostCount;
+          }
+        }
+      }
+    }
+
     return success({
-      posts: paginatedPosts,
-      cursor: nextCursor,
+      items: paginatedPosts,
+      nextCursor,
       hasMore,
     });
   } catch (error) {
@@ -1067,25 +1279,56 @@ feed.get("/chronological", requireAuth, async (c) => {
       hasMore: boolean;
     };
 
-    // Filter and transform posts (no additional subrequests needed)
     const blockedSet = new Set(blockedUserIds);
-    const posts = feedData.posts
+    const filteredPosts = feedData.posts
       .filter((post) => !blockedSet.has(post.authorId as string))
       .filter((post) => {
         if (!mutedMatcher) return true;
-        const content = (post.content as string || "").toLowerCase();
+        const content = ((post.content as string) || "").toLowerCase();
         return !mutedMatcher(content);
       })
-      .slice(0, limit)
-      .map((post) => ({
-        ...post,
-        hasLiked: false,
-        hasReposted: false,
-      }));
+      .slice(0, limit);
+
+    const allIds = new Set<string>();
+    for (const p of filteredPosts) {
+      allIds.add(p.id as string);
+      if (p.repostOfId) allIds.add(p.repostOfId as string);
+    }
+
+    const freshMap = await batchKVGet<PostMetadata>(
+      c.env,
+      [...allIds].map((id) => `post:${id}`),
+      "POSTS_KV",
+      { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+    );
+
+    const posts = filteredPosts.map((post) => {
+      const fresh = freshMap.get(`post:${post.id}`) as PostMetadata | null;
+      const result = fresh
+        ? { ...fresh, source: post.source, hasLiked: false, hasReposted: false }
+        : {
+            ...(post as unknown as PostMetadata),
+            hasLiked: false,
+            hasReposted: false,
+          };
+
+      if (result.repostOfId && result.originalPost) {
+        const freshOrig = freshMap.get(`post:${result.repostOfId}`);
+        if (freshOrig) {
+          result.originalPost = {
+            ...result.originalPost,
+            likeCount: freshOrig.likeCount,
+            replyCount: freshOrig.replyCount,
+            repostCount: freshOrig.repostCount,
+          };
+        }
+      }
+      return result;
+    });
 
     return success({
-      posts,
-      cursor: feedData.cursor,
+      items: posts,
+      nextCursor: feedData.cursor,
       hasMore: feedData.hasMore,
     });
   } catch (error) {
@@ -1147,8 +1390,9 @@ function roundRobinMerge(
 
     // Check author diversity before adding
     if (postToAdd) {
-      const authorCount = recentAuthors.filter((a) => a === postToAdd.authorId)
-        .length;
+      const authorCount = recentAuthors.filter(
+        (a) => a === postToAdd.authorId,
+      ).length;
       if (authorCount >= maxSameAuthor) {
         // Skip this post to maintain diversity, but don't increment cycle
         // The post is already consumed (index incremented), so we continue

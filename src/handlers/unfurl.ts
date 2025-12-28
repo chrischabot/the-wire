@@ -3,8 +3,8 @@
  * Fetches metadata (Open Graph, Twitter Cards) from URLs to display rich previews
  */
 
-import { Hono } from 'hono';
-import type { Env } from '../types/env';
+import { Hono } from "hono";
+import type { Env } from "../types/env";
 
 const unfurlRoutes = new Hono<{ Bindings: Env }>();
 
@@ -26,7 +26,7 @@ function isValidExternalUrl(urlString: string): boolean {
     const url = new URL(urlString);
 
     // Only allow http/https
-    if (!['http:', 'https:'].includes(url.protocol)) {
+    if (!["http:", "https:"].includes(url.protocol)) {
       return false;
     }
 
@@ -34,15 +34,19 @@ function isValidExternalUrl(urlString: string): boolean {
     const hostname = url.hostname.toLowerCase();
 
     // Block localhost variants
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1"
+    ) {
       return false;
     }
 
     // Block private IP ranges (basic check)
-    const ipParts = hostname.split('.');
+    const ipParts = hostname.split(".");
     if (ipParts.length === 4) {
-      const first = parseInt(ipParts[0] ?? '0');
-      const second = parseInt(ipParts[1] ?? '0');
+      const first = parseInt(ipParts[0] ?? "0");
+      const second = parseInt(ipParts[1] ?? "0");
       // 10.x.x.x
       if (first === 10) return false;
       // 172.16-31.x.x
@@ -54,7 +58,7 @@ function isValidExternalUrl(urlString: string): boolean {
     }
 
     // Block internal hostnames
-    if (hostname.endsWith('.internal') || hostname.endsWith('.local')) {
+    if (hostname.endsWith(".internal") || hostname.endsWith(".local")) {
       return false;
     }
 
@@ -64,27 +68,37 @@ function isValidExternalUrl(urlString: string): boolean {
   }
 }
 
-/**
- * Extract meta tag content from HTML
- */
-function extractMetaContent(html: string, property: string): string | undefined {
-  // Try property attribute (og:, twitter:)
-  const propertyMatch = html.match(
-    new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i')
-  ) || html.match(
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${property}["']`, 'i')
-  );
+function extractMetaContent(
+  html: string,
+  property: string,
+): string | undefined {
+  const escapedProp = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  if (propertyMatch) return propertyMatch[1];
+  const patterns = [
+    new RegExp(
+      `<meta[^>]*property=["']${escapedProp}["'][^>]*content=["']([^"']+)["']`,
+      "i",
+    ),
+    new RegExp(
+      `<meta[^>]*content=["']([^"']+)["'][^>]*property=["']${escapedProp}["']`,
+      "i",
+    ),
+    new RegExp(
+      `<meta[^>]*name=["']${escapedProp}["'][^>]*content=["']([^"']+)["']`,
+      "i",
+    ),
+    new RegExp(
+      `<meta[^>]*content=["']([^"']+)["'][^>]*name=["']${escapedProp}["']`,
+      "i",
+    ),
+  ];
 
-  // Try name attribute (twitter:, description)
-  const nameMatch = html.match(
-    new RegExp(`<meta[^>]+name=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i')
-  ) || html.match(
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${property}["']`, 'i')
-  );
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return match[1];
+  }
 
-  return nameMatch?.[1];
+  return undefined;
 }
 
 /**
@@ -100,18 +114,20 @@ function extractTitle(html: string): string | undefined {
  */
 function extractFavicon(html: string, baseUrl: string): string | undefined {
   // Try link rel="icon" or rel="shortcut icon"
-  const iconMatch = html.match(
-    /<link[^>]+rel=["'](?:shortcut )?icon["'][^>]+href=["']([^"']+)["']/i
-  ) || html.match(
-    /<link[^>]+href=["']([^"']+)["'][^>]+rel=["'](?:shortcut )?icon["']/i
-  );
+  const iconMatch =
+    html.match(
+      /<link[^>]+rel=["'](?:shortcut )?icon["'][^>]+href=["']([^"']+)["']/i,
+    ) ||
+    html.match(
+      /<link[^>]+href=["']([^"']+)["'][^>]+rel=["'](?:shortcut )?icon["']/i,
+    );
 
   if (iconMatch) {
     const href = iconMatch[1];
     if (!href) return undefined;
-    if (href.startsWith('http')) return href;
-    if (href.startsWith('//')) return `https:${href}`;
-    if (href.startsWith('/')) return `${new URL(baseUrl).origin}${href}`;
+    if (href.startsWith("http")) return href;
+    if (href.startsWith("//")) return `https:${href}`;
+    if (href.startsWith("/")) return `${new URL(baseUrl).origin}${href}`;
     return `${new URL(baseUrl).origin}/${href}`;
   }
 
@@ -122,11 +138,14 @@ function extractFavicon(html: string, baseUrl: string): string | undefined {
 /**
  * Resolve relative URLs to absolute
  */
-function resolveUrl(url: string | undefined, baseUrl: string): string | undefined {
+function resolveUrl(
+  url: string | undefined,
+  baseUrl: string,
+): string | undefined {
   if (!url) return undefined;
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('//')) return `https:${url}`;
-  if (url.startsWith('/')) return `${new URL(baseUrl).origin}${url}`;
+  if (url.startsWith("http")) return url;
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("/")) return `${new URL(baseUrl).origin}${url}`;
   return `${new URL(baseUrl).origin}/${url}`;
 }
 
@@ -144,10 +163,17 @@ async function unfurlUrl(url: string): Promise<UnfurlResult> {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; TheWire/1.0; +https://the-wire.chabotc.workers.dev)',
-        'Accept': 'text/html,application/xhtml+xml',
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
       },
-      redirect: 'follow',
+      redirect: "follow",
     });
 
     clearTimeout(timeoutId);
@@ -157,19 +183,19 @@ async function unfurlUrl(url: string): Promise<UnfurlResult> {
     }
 
     // Only process HTML
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('text/html')) {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/html")) {
       return result;
     }
 
-    // Read first 100KB of HTML (enough for meta tags in head)
+    // Read up to 500KB of HTML (some sites like CNN have 300KB+ inline CSS before meta tags)
     const reader = response.body?.getReader();
     if (!reader) return result;
 
-    let html = '';
+    let html = "";
     const decoder = new TextDecoder();
     let bytesRead = 0;
-    const maxBytes = 100 * 1024;
+    const maxBytes = 500 * 1024;
 
     while (bytesRead < maxBytes) {
       const { done, value } = await reader.read();
@@ -178,36 +204,41 @@ async function unfurlUrl(url: string): Promise<UnfurlResult> {
       bytesRead += value.length;
 
       // Stop if we've passed </head>
-      if (html.includes('</head>')) break;
+      if (html.includes("</head>")) break;
     }
 
     reader.cancel();
 
     // Extract metadata with Twitter Card fallback to Open Graph
-    const title = extractMetaContent(html, 'twitter:title')
-      || extractMetaContent(html, 'og:title')
-      || extractTitle(html);
+    const title =
+      extractMetaContent(html, "twitter:title") ||
+      extractMetaContent(html, "og:title") ||
+      extractTitle(html);
     if (title) result.title = title;
 
-    const description = extractMetaContent(html, 'twitter:description')
-      || extractMetaContent(html, 'og:description')
-      || extractMetaContent(html, 'description');
+    const description =
+      extractMetaContent(html, "twitter:description") ||
+      extractMetaContent(html, "og:description") ||
+      extractMetaContent(html, "description");
     if (description) result.description = description;
 
-    const rawImage = extractMetaContent(html, 'twitter:image')
-      || extractMetaContent(html, 'twitter:image:src')
-      || extractMetaContent(html, 'og:image');
+    const rawImage =
+      extractMetaContent(html, "twitter:image") ||
+      extractMetaContent(html, "twitter:image:src") ||
+      extractMetaContent(html, "og:image");
     const image = resolveUrl(rawImage, url);
     if (image) result.image = image;
 
-    const siteName = extractMetaContent(html, 'og:site_name')
-      || extractMetaContent(html, 'twitter:site')
-      || new URL(url).hostname.replace(/^www\./, '');
+    const siteName =
+      extractMetaContent(html, "og:site_name") ||
+      extractMetaContent(html, "twitter:site") ||
+      new URL(url).hostname.replace(/^www\./, "");
     if (siteName) result.siteName = siteName;
 
-    const type = extractMetaContent(html, 'twitter:card')
-      || extractMetaContent(html, 'og:type')
-      || 'summary';
+    const type =
+      extractMetaContent(html, "twitter:card") ||
+      extractMetaContent(html, "og:type") ||
+      "summary";
     if (type) result.type = type;
 
     const favicon = extractFavicon(html, url);
@@ -225,11 +256,10 @@ async function unfurlUrl(url: string): Promise<UnfurlResult> {
 
     // Truncate description if too long
     if (result.description && result.description.length > 200) {
-      result.description = result.description.substring(0, 200) + '...';
+      result.description = result.description.substring(0, 200) + "...";
     }
-
   } catch (error) {
-    console.error('Unfurl error:', error);
+    console.error("Unfurl error:", error);
   }
 
   return result;
@@ -241,14 +271,14 @@ async function unfurlUrl(url: string): Promise<UnfurlResult> {
 function decodeHtmlEntities(text: string | undefined): string | undefined {
   if (!text) return text;
   return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, '/')
+    .replace(/&#x2F;/g, "/")
     .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)));
 }
 
@@ -256,29 +286,35 @@ function decodeHtmlEntities(text: string | undefined): string | undefined {
  * GET /api/unfurl?url=<url>
  * Fetch metadata for a URL
  */
-unfurlRoutes.get('/', async (c) => {
-  const url = c.req.query('url');
+unfurlRoutes.get("/", async (c) => {
+  const url = c.req.query("url");
 
   if (!url) {
-    return c.json({
-      success: false,
-      error: 'URL parameter required',
-    }, 400);
+    return c.json(
+      {
+        success: false,
+        error: "URL parameter required",
+      },
+      400,
+    );
   }
 
   // Validate URL format
   try {
     new URL(url);
   } catch {
-    return c.json({
-      success: false,
-      error: 'Invalid URL format',
-    }, 400);
+    return c.json(
+      {
+        success: false,
+        error: "Invalid URL format",
+      },
+      400,
+    );
   }
 
   // Validate URL to prevent SSRF
   if (!isValidExternalUrl(url)) {
-    return c.json({ success: false, error: 'Invalid or blocked URL' }, 400);
+    return c.json({ success: false, error: "Invalid or blocked URL" }, 400);
   }
 
   // Check cache first

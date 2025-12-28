@@ -4,6 +4,8 @@ export { NotificationsPage } from "./NotificationsPage";
 export { ProfilePage } from "./ProfilePage";
 export { PostPage } from "./PostPage";
 export { SettingsPage } from "./SettingsPage";
+export { MutedWordsPage } from "./MutedWordsPage";
+export { AdminPage } from "./AdminPage";
 export { LoginPage } from "./LoginPage";
 export { SignupPage } from "./SignupPage";
 export { SearchPage } from "./SearchPage";

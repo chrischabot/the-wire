@@ -105,8 +105,8 @@ const styles = {
 };
 
 const iconColors: Record<Notification["type"], string> = {
-  like: "#F91880",
-  repost: "#00BA7C",
+  like: "var(--like)",
+  repost: "var(--repost)",
   follow: "var(--primary)",
   reply: "var(--primary)",
   mention: "var(--primary)",
@@ -230,7 +230,7 @@ export function NotificationsPage() {
   );
 
   return (
-    <AppLayout showPostButton={true} rightSidebar={rightSidebar}>
+    <AppLayout showPostButton={false} rightSidebar={rightSidebar}>
       <div className="page-header">
         <h2>Notifications</h2>
       </div>

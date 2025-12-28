@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   useQuery,
   useInfiniteQuery,
@@ -29,13 +29,16 @@ const styles = {
   } as React.CSSProperties,
   profileInfo: {
     padding: "0 16px 16px",
-    marginTop: "-48px",
+  } as React.CSSProperties,
+  headerRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
   } as React.CSSProperties,
   actionsRow: {
     display: "flex",
     justifyContent: "flex-end",
-    marginBottom: "12px",
-    height: "36px",
+    marginTop: "12px",
   } as React.CSSProperties,
   avatar: {
     width: "134px",
@@ -45,6 +48,7 @@ const styles = {
     objectFit: "cover" as const,
     background: "var(--primary)",
     cursor: "zoom-in",
+    marginTop: "-67px",
   } as React.CSSProperties,
   avatarPlaceholder: {
     width: "134px",
@@ -52,6 +56,7 @@ const styles = {
     borderRadius: "50%",
     border: "4px solid var(--background)",
     background: "var(--primary)",
+    marginTop: "-67px",
   } as React.CSSProperties,
   name: {
     fontSize: "20px",
@@ -160,6 +165,7 @@ const styles = {
 };
 
 export function ProfilePage() {
+  const navigate = useNavigate();
   const { handle } = useParams<{ handle: string }>();
   const currentUser = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
@@ -265,7 +271,7 @@ export function ProfilePage() {
           if (e.key === "Enter") {
             const value = (e.target as HTMLInputElement).value.trim();
             if (value.length >= 2) {
-              window.location.href = `/search?q=${encodeURIComponent(value)}`;
+              navigate(`/search?q=${encodeURIComponent(value)}`);
             }
           }
         }}
@@ -274,7 +280,7 @@ export function ProfilePage() {
   );
 
   return (
-    <AppLayout rightSidebar={rightSidebar}>
+    <AppLayout rightSidebar={rightSidebar} showPostButton={false}>
       <div className="page-header">
         <h2>@{handle}</h2>
       </div>
@@ -298,41 +304,45 @@ export function ProfilePage() {
         )}
 
         <div style={styles.profileInfo}>
-          <div style={styles.actionsRow}>
-            {isOwnProfile ? (
-              <button
-                style={styles.btnSecondary}
-                onClick={() => (window.location.href = "/settings")}
-              >
-                Edit profile
-              </button>
+          <div style={styles.headerRow}>
+            {profile.avatarUrl ? (
+              <img
+                src={profile.avatarUrl}
+                alt={profile.displayName}
+                style={styles.avatar}
+                onClick={() => setModalImage(profile.avatarUrl!)}
+              />
             ) : (
-              <button
-                style={
-                  profile.isFollowing ? styles.btnSecondary : styles.btnPrimary
-                }
-                onClick={() => followMutation.mutate()}
-                disabled={followMutation.isPending}
-              >
-                {followMutation.isPending
-                  ? "..."
-                  : profile.isFollowing
-                    ? "Following"
-                    : "Follow"}
-              </button>
+              <div style={styles.avatarPlaceholder} />
             )}
-          </div>
 
-          {profile.avatarUrl ? (
-            <img
-              src={profile.avatarUrl}
-              alt={profile.displayName}
-              style={styles.avatar}
-              onClick={() => setModalImage(profile.avatarUrl!)}
-            />
-          ) : (
-            <div style={styles.avatarPlaceholder} />
-          )}
+            <div style={styles.actionsRow}>
+              {isOwnProfile ? (
+                <button
+                  style={styles.btnSecondary}
+                  onClick={() => navigate("/settings")}
+                >
+                  Edit profile
+                </button>
+              ) : (
+                <button
+                  style={
+                    profile.isFollowing
+                      ? styles.btnSecondary
+                      : styles.btnPrimary
+                  }
+                  onClick={() => followMutation.mutate()}
+                  disabled={followMutation.isPending}
+                >
+                  {followMutation.isPending
+                    ? "..."
+                    : profile.isFollowing
+                      ? "Following"
+                      : "Follow"}
+                </button>
+              )}
+            </div>
+          </div>
 
           <div style={styles.name}>{profile.displayName}</div>
           <div style={styles.handle}>@{profile.handle}</div>

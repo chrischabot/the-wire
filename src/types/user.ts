@@ -19,11 +19,11 @@ export interface AuthUser {
  * JWT payload structure
  */
 export interface JWTPayload {
-  sub: string;      // User ID
+  sub: string; // User ID
   email: string;
   handle: string;
-  iat: number;      // Issued at
-  exp: number;      // Expiration
+  iat: number; // Issued at
+  exp: number; // Expiration
 }
 
 /**
@@ -91,6 +91,9 @@ export interface AuthResponse {
     id: string;
     email: string;
     handle: string;
+    displayName: string;
+    avatarUrl?: string;
+    isAdmin?: boolean;
   };
   token: string;
   expiresAt: number;

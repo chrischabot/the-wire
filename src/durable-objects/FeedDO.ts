@@ -3,16 +3,17 @@
  * Manages a user's personalized timeline/feed with complete filtering
  */
 
-import type { Env } from '../types/env';
-import type { PostMetadata } from '../types/post';
-import type { MutedWordEntry } from '../types/user';
-import { LIMITS } from '../constants';
+import type { Env } from "../types/env";
+import type { PostMetadata } from "../types/post";
+import type { MutedWordEntry } from "../types/user";
+import { LIMITS } from "../constants";
+import { batchKVGet } from "../utils/batch";
 
 export interface FeedEntry {
   postId: string;
   authorId: string;
   timestamp: number;
-  source: 'own' | 'follow' | 'fof';
+  source: "own" | "follow" | "fof";
 }
 
 interface FeedState {
@@ -25,7 +26,7 @@ export class FeedDO implements DurableObject {
 
   constructor(
     private durableState: DurableObjectState,
-    private env: Env
+    private env: Env,
   ) {}
 
   /**
@@ -36,7 +37,7 @@ export class FeedDO implements DurableObject {
       return this.state;
     }
 
-    const stored = await this.durableState.storage.get<FeedState>('state');
+    const stored = await this.durableState.storage.get<FeedState>("state");
     if (stored) {
       this.state = stored;
       return stored;
@@ -55,7 +56,7 @@ export class FeedDO implements DurableObject {
    */
   private async saveState(): Promise<void> {
     if (!this.state) return;
-    await this.durableState.storage.put('state', this.state);
+    await this.durableState.storage.put("state", this.state);
   }
 
   /**
@@ -64,13 +65,15 @@ export class FeedDO implements DurableObject {
   private async applyFilters(
     entries: FeedEntry[],
     blockedUserIds: string[],
-    mutedWords: Array<string | MutedWordEntry>
+    mutedWords: Array<string | MutedWordEntry>,
   ): Promise<FeedEntry[]> {
     let filtered = entries;
 
     // Filter blocked authors
     if (blockedUserIds.length > 0) {
-      filtered = filtered.filter((entry) => !blockedUserIds.includes(entry.authorId));
+      filtered = filtered.filter(
+        (entry) => !blockedUserIds.includes(entry.authorId),
+      );
     }
 
     // Filter posts with muted words
@@ -83,22 +86,27 @@ export class FeedDO implements DurableObject {
         filtered.map(async (entry) => {
           try {
             // Fetch post metadata from KV to get content
-            const postData = await this.env.POSTS_KV.get(`post:${entry.postId}`);
+            const postData = await this.env.POSTS_KV.get(
+              `post:${entry.postId}`,
+            );
             if (!postData) return { entry, include: false };
-            
+
             const post: PostMetadata = JSON.parse(postData);
-            const content = post.content || post.originalPost?.content || '';
-            
+            const content = post.content || post.originalPost?.content || "";
+
             // Check if content contains any muted word
             const hasMutedWord = mutedMatcher(content);
-            
+
             return { entry, include: !hasMutedWord };
           } catch (error) {
             // If we can't fetch the post, exclude it for safety
-            console.error(`Error fetching post ${entry.postId} for muted word filtering:`, error);
+            console.error(
+              `Error fetching post ${entry.postId} for muted word filtering:`,
+              error,
+            );
             return { entry, include: false };
           }
-        })
+        }),
       );
 
       filtered = entriesWithContent
@@ -114,7 +122,7 @@ export class FeedDO implements DurableObject {
    */
   async addEntry(entry: FeedEntry): Promise<void> {
     const state = await this.ensureState();
-    
+
     const exists = state.entries.some((e) => e.postId === entry.postId);
     if (exists) return;
 
@@ -132,7 +140,7 @@ export class FeedDO implements DurableObject {
    */
   async removeEntry(postId: string): Promise<void> {
     const state = await this.ensureState();
-    
+
     state.entries = state.entries.filter((e) => e.postId !== postId);
     await this.saveState();
   }
@@ -144,19 +152,19 @@ export class FeedDO implements DurableObject {
     cursor?: string,
     limit: number = 20,
     blockedUserIds: string[] = [],
-    mutedWords: Array<string | MutedWordEntry> = []
+    mutedWords: Array<string | MutedWordEntry> = [],
   ): Promise<{
     entries: FeedEntry[];
     cursor: string | null;
     hasMore: boolean;
   }> {
     const state = await this.ensureState();
-    
+
     // Apply filters (blocked users and muted words)
     const filteredEntries = await this.applyFilters(
       state.entries,
       blockedUserIds,
-      mutedWords
+      mutedWords,
     );
 
     let startIndex = 0;
@@ -206,137 +214,149 @@ export class FeedDO implements DurableObject {
 
     try {
       // Add entry
-      if (path === '/add-entry' && method === 'POST') {
-        const body = await request.json() as { entry: FeedEntry };
+      if (path === "/add-entry" && method === "POST") {
+        const body = (await request.json()) as { entry: FeedEntry };
         await this.addEntry(body.entry);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Remove entry
-      if (path === '/remove-entry' && method === 'POST') {
-        const body = await request.json() as { postId: string };
+      if (path === "/remove-entry" && method === "POST") {
+        const body = (await request.json()) as { postId: string };
         await this.removeEntry(body.postId);
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Get feed with filters
-      if (path === '/feed' && method === 'GET') {
-        const cursor = url.searchParams.get('cursor') || undefined;
-        const limit = parseInt(url.searchParams.get('limit') || '20', 10);
-        
+      if (path === "/feed" && method === "GET") {
+        const cursor = url.searchParams.get("cursor") || undefined;
+        const limit = parseInt(url.searchParams.get("limit") || "20", 10);
+
         // Parse filter params with validation
         let blockedUserIds: string[] = [];
         let mutedWords: Array<string | MutedWordEntry> = [];
-        
-        const blockedParam = url.searchParams.get('blocked');
+
+        const blockedParam = url.searchParams.get("blocked");
         if (blockedParam) {
           try {
             blockedUserIds = JSON.parse(blockedParam);
           } catch {
-            return new Response(JSON.stringify({ error: 'Invalid blocked parameter' }), {
-              status: 400,
-              headers: { 'Content-Type': 'application/json' },
-            });
+            return new Response(
+              JSON.stringify({ error: "Invalid blocked parameter" }),
+              {
+                status: 400,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
           }
         }
-        
-        const mutedParam = url.searchParams.get('muted');
+
+        const mutedParam = url.searchParams.get("muted");
         if (mutedParam) {
           try {
             mutedWords = JSON.parse(mutedParam);
           } catch {
-            return new Response(JSON.stringify({ error: 'Invalid muted parameter' }), {
-              status: 400,
-              headers: { 'Content-Type': 'application/json' },
-            });
+            return new Response(
+              JSON.stringify({ error: "Invalid muted parameter" }),
+              {
+                status: 400,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
           }
         }
-        
-        const result = await this.getFeed(cursor, limit, blockedUserIds, mutedWords);
+
+        const result = await this.getFeed(
+          cursor,
+          limit,
+          blockedUserIds,
+          mutedWords,
+        );
         return new Response(JSON.stringify(result), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      // BATCHED: Get feed with full post data (reduces worker subrequests)
-      if (path === '/feed-with-posts' && method === 'GET') {
-        const cursor = url.searchParams.get('cursor') || undefined;
-        const limit = parseInt(url.searchParams.get('limit') || '20', 10);
+      if (path === "/feed-with-posts" && method === "GET") {
+        const cursor = url.searchParams.get("cursor") || undefined;
+        const limit = parseInt(url.searchParams.get("limit") || "20", 10);
 
         const result = await this.getFeed(cursor, limit, [], []);
 
-        // Fetch full post data for each entry - this happens inside DO context
+        const entriesToFetch = result.entries.slice(0, limit);
+        const kvKeys = entriesToFetch.map((e) => `post:${e.postId}`);
+        const postMap = await batchKVGet(this.env, kvKeys, "POSTS_KV", {
+          parse: (val) => (val ? JSON.parse(val) : null),
+        });
+
         const posts: Array<Record<string, unknown> & { source: string }> = [];
-        for (const entry of result.entries.slice(0, limit)) {
-          const postData = await this.env.POSTS_KV.get(`post:${entry.postId}`);
-          if (postData) {
-            try {
-              const post = JSON.parse(postData);
-              if (!post.isDeleted && !post.isTakenDown) {
-                posts.push({ ...post, source: entry.source });
-              }
-            } catch {
-              // Skip invalid post data
-            }
+        for (const entry of entriesToFetch) {
+          const post = postMap.get(`post:${entry.postId}`);
+          if (post && !post.isDeleted && !post.isTakenDown) {
+            posts.push({ ...post, source: entry.source });
           }
         }
 
-        return new Response(JSON.stringify({
-          posts,
-          cursor: result.cursor,
-          hasMore: result.hasMore,
-        }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({
+            posts,
+            cursor: result.cursor,
+            hasMore: result.hasMore,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
 
       // Clear feed
-      if (path === '/clear' && method === 'POST') {
+      if (path === "/clear" && method === "POST") {
         await this.clear();
         return new Response(JSON.stringify({ success: true }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
       // Get count
-      if (path === '/count' && method === 'GET') {
+      if (path === "/count" && method === "GET") {
         const count = await this.getCount();
         return new Response(JSON.stringify({ count }), {
-          headers: { 'Content-Type': 'application/json' },
+          headers: { "Content-Type": "application/json" },
         });
       }
 
-      return new Response('Not found', { status: 404 });
+      return new Response("Not found", { status: 404 });
     } catch (error) {
-      console.error('FeedDO fetch error:', error);
-      return new Response(JSON.stringify({ error: 'Internal error' }), {
+      console.error("FeedDO fetch error:", error);
+      return new Response(JSON.stringify({ error: "Internal error" }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       });
     }
   }
 
-  private normalizeMutedWords(
-    input: Array<string | MutedWordEntry>
-  ): string[] {
+  private normalizeMutedWords(input: Array<string | MutedWordEntry>): string[] {
     if (!Array.isArray(input)) return [];
     const now = Date.now();
     const unique = new Set<string>();
 
     for (const entry of input) {
-      if (typeof entry === 'string') {
+      if (typeof entry === "string") {
         const word = entry.trim().toLowerCase();
         if (word) unique.add(word);
         continue;
       }
-      if (!entry || typeof entry !== 'object') continue;
-      if (entry.scope === 'not_following') continue;
-      if (typeof entry.expiresAt === 'number' && entry.expiresAt <= now) continue;
-      const word = String(entry.word || '').trim().toLowerCase();
+      if (!entry || typeof entry !== "object") continue;
+      if (entry.scope === "not_following") continue;
+      if (typeof entry.expiresAt === "number" && entry.expiresAt <= now)
+        continue;
+      const word = String(entry.word || "")
+        .trim()
+        .toLowerCase();
       if (word) unique.add(word);
     }
 
@@ -344,18 +364,18 @@ export class FeedDO implements DurableObject {
   }
 
   private buildMutedWordMatcher(
-    mutedWords: string[]
+    mutedWords: string[],
   ): ((content: string) => boolean) | null {
     if (!mutedWords.length) return null;
     const escaped = mutedWords
       .map((word) => this.escapeRegex(word.trim().toLowerCase()))
       .filter((word) => word.length > 0);
     if (escaped.length === 0) return null;
-    const regex = new RegExp(`\\b(${escaped.join('|')})\\b`, 'i');
-    return (content: string) => regex.test(content || '');
+    const regex = new RegExp(`\\b(${escaped.join("|")})\\b`, "i");
+    return (content: string) => regex.test(content || "");
   }
 
   private escapeRegex(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 }

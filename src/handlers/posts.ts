@@ -10,6 +10,7 @@ import { generateId } from "../services/snowflake";
 import { requireAuth, optionalAuth } from "../middleware/auth";
 import { rateLimit, RATE_LIMITS } from "../middleware/rate-limit";
 import { LIMITS, BATCH_SIZE } from "../constants";
+import { batchKVGet } from "../utils/batch";
 import {
   createNotification,
   createMentionNotifications,
@@ -149,21 +150,35 @@ posts.post("/", requireAuth, rateLimit(RATE_LIMITS.post), async (c) => {
   if (body.replyToId) {
     const parentDoId = c.env.POST_DO.idFromName(body.replyToId);
     const parentStub = c.env.POST_DO.get(parentDoId);
-    await parentStub.fetch("https://do.internal/replies/increment", {
-      method: "POST",
-    });
+    const replyIncrResp = await parentStub.fetch(
+      "https://do.internal/replies/increment",
+      {
+        method: "POST",
+      },
+    );
+    const { replyCount } = (await replyIncrResp.json()) as {
+      replyCount: number;
+    };
 
     // Update reply index
     const replyIndexKey = `replies:${body.replyToId}`;
-    const existingIndex = await c.env.POSTS_KV.get(replyIndexKey);
-    const replyIds: string[] = existingIndex ? JSON.parse(existingIndex) : [];
+    const existingReplyIndex = await c.env.POSTS_KV.get(replyIndexKey);
+    const replyIds: string[] = existingReplyIndex
+      ? JSON.parse(existingReplyIndex)
+      : [];
     replyIds.push(postId);
     await c.env.POSTS_KV.put(replyIndexKey, JSON.stringify(replyIds));
 
-    // Create reply notification for parent post author
     const parentPostData = await c.env.POSTS_KV.get(`post:${body.replyToId}`);
     if (parentPostData) {
       const parentPost = JSON.parse(parentPostData);
+      parentPost.replyCount = replyCount;
+      await c.env.POSTS_KV.put(
+        `post:${body.replyToId}`,
+        JSON.stringify(parentPost),
+      );
+
+      // Create reply notification for parent post author (not self)
       if (parentPost.authorId !== userId) {
         await createNotification(c.env, {
           userId: parentPost.authorId,
@@ -288,29 +303,48 @@ posts.get("/:id/thread", optionalAuth, async (c) => {
     const newestFirstIds = replyIds.slice().reverse();
     const replyIdsToFetch = newestFirstIds.slice(0, Math.min(limit, 50));
 
+    const kvKeys = replyIdsToFetch.map((id) => `post:${id}`);
+    const postMap = await batchKVGet(c.env, kvKeys, "POSTS_KV", {
+      parse: (val) => (val ? JSON.parse(val) : null),
+    });
+
+    const validReplies: PostMetadata[] = [];
     for (const replyId of replyIdsToFetch) {
-      const replyData = await c.env.POSTS_KV.get(`post:${replyId}`);
-      if (!replyData) continue;
-
-      const reply = JSON.parse(replyData);
-      if (reply.isDeleted) continue;
-
-      // Check if user liked this reply
-      let hasLiked = false;
-      if (userId) {
-        try {
-          const doId = c.env.POST_DO.idFromName(reply.id);
-          const stub = c.env.POST_DO.get(doId);
-          const likedResp = await stub.fetch(
-            `https://do.internal/has-liked?userId=${userId}`,
-          );
-          const likedData = (await likedResp.json()) as { hasLiked: boolean };
-          hasLiked = likedData.hasLiked;
-        } catch {
-          // Ignore error
-        }
+      const reply = postMap.get(`post:${replyId}`) as PostMetadata | null;
+      if (reply && !reply.isDeleted) {
+        validReplies.push(reply);
       }
-      replies.push({ ...reply, hasLiked });
+    }
+
+    let likedMap: Record<string, boolean> = {};
+    if (userId && validReplies.length > 0) {
+      try {
+        const userStubId = c.env.USER_DO.idFromName(userId);
+        const userStub = c.env.USER_DO.get(userStubId);
+        const likedRes = await userStub.fetch(
+          "https://user-do/batch-has-liked",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ postIds: validReplies.map((p) => p.id) }),
+          },
+        );
+        if (likedRes.ok) {
+          const likedData = (await likedRes.json()) as {
+            liked: Record<string, boolean>;
+          };
+          likedMap = likedData.liked;
+        }
+      } catch {
+        // Non-fatal: continue without likes data
+      }
+    }
+
+    for (const reply of validReplies) {
+      (replies as (PostMetadata & { hasLiked: boolean })[]).push({
+        ...reply,
+        hasLiked: likedMap[reply.id] ?? false,
+      });
     }
   } else {
     // Fallback: scan KV but with a strict limit to avoid hitting subrequest limit
@@ -394,31 +428,47 @@ posts.get("/:id/replies", optionalAuth, async (c) => {
   }
 
   const replyIdsToFetch = newestFirstIds.slice(startIndex, startIndex + limit);
-  const replies: PostMetadata[] = [];
 
+  const kvKeys = replyIdsToFetch.map((id) => `post:${id}`);
+  const postMap = await batchKVGet(c.env, kvKeys, "POSTS_KV", {
+    parse: (val) => (val ? JSON.parse(val) : null),
+  });
+
+  const validReplies: PostMetadata[] = [];
   for (const replyId of replyIdsToFetch) {
-    const replyData = await c.env.POSTS_KV.get(`post:${replyId}`);
-    if (!replyData) continue;
-
-    const reply = JSON.parse(replyData);
-    if (reply.isDeleted) continue;
-
-    let hasLiked = false;
-    if (userId) {
-      try {
-        const doId = c.env.POST_DO.idFromName(reply.id);
-        const stub = c.env.POST_DO.get(doId);
-        const likedResp = await stub.fetch(
-          `https://do.internal/has-liked?userId=${userId}`,
-        );
-        const likedData = (await likedResp.json()) as { hasLiked: boolean };
-        hasLiked = likedData.hasLiked;
-      } catch {
-        // Ignore
-      }
+    const reply = postMap.get(`post:${replyId}`) as PostMetadata | null;
+    if (reply && !reply.isDeleted) {
+      validReplies.push(reply);
     }
-    replies.push({ ...reply, hasLiked });
   }
+
+  let likedMap: Record<string, boolean> = {};
+  if (userId && validReplies.length > 0) {
+    try {
+      const userStubId = c.env.USER_DO.idFromName(userId);
+      const userStub = c.env.USER_DO.get(userStubId);
+      const likedRes = await userStub.fetch("https://user-do/batch-has-liked", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postIds: validReplies.map((p) => p.id) }),
+      });
+      if (likedRes.ok) {
+        const likedData = (await likedRes.json()) as {
+          liked: Record<string, boolean>;
+        };
+        likedMap = likedData.liked;
+      }
+    } catch {
+      // Non-fatal: continue without likes data
+    }
+  }
+
+  const replies: (PostMetadata & { hasLiked: boolean })[] = validReplies.map(
+    (reply) => ({
+      ...reply,
+      hasLiked: likedMap[reply.id] ?? false,
+    }),
+  );
 
   const sortOwnRepliesFirst = (a: PostMetadata, b: PostMetadata) => {
     const aIsOwnReply = userId && a.authorId === userId;
@@ -718,6 +768,10 @@ posts.post("/:id/repost", requireAuth, async (c) => {
       authorAvatarUrl: originalAuthorProfile.avatarUrl || "",
       content: originalPost.content,
       mediaUrls: originalPost.mediaUrls,
+      createdAt: originalPost.createdAt,
+      likeCount: originalPost.likeCount,
+      replyCount: originalPost.replyCount,
+      repostCount: originalPost.repostCount,
     },
     createdAt: now,
     likeCount: 0,

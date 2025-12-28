@@ -18,25 +18,13 @@ import notificationsRoutes from "./handlers/notifications";
 import searchRoutes from "./handlers/search";
 import seedRoutes from "./handlers/seed";
 import unfurlRoutes from "./handlers/unfurl";
+import batchRoutes from "./handlers/batch";
 import { rateLimit, RATE_LIMITS } from "./middleware/rate-limit";
 import { csrfProtection } from "./middleware/csrf";
 import { handleScheduled } from "./handlers/scheduled";
 import { getStyles } from "./styles";
 import { getClientJS } from "./client-js";
 import { getLandingPage } from "./pages/landing";
-import { getSignupPage, getLoginPage } from "./pages/auth";
-import { getSearchPage } from "./pages/search";
-import { getExplorePage } from "./pages/explore";
-import { getNotificationsPage } from "./pages/notifications";
-import { getHomePage } from "./pages/home";
-import { getPostPage } from "./pages/post";
-import { getSettingsPage, getMutedSettingsPage } from "./pages/settings";
-import { getAdminPage } from "./pages/admin";
-import {
-  getProfilePage,
-  getFollowersPage,
-  getFollowingPage,
-} from "./pages/profile";
 
 // Create Hono app with environment typing
 const app = new Hono<{ Bindings: Env }>();
@@ -98,78 +86,33 @@ app.get("/health", (c) => {
   });
 });
 
-// Landing page
+// Landing page (SSR - marketing/welcome page)
 app.get("/", (c) => {
   return c.html(getLandingPage());
 });
 
-// Signup page
-app.get("/signup", (c) => {
-  return c.html(getSignupPage());
-});
+async function serveSPA(c: import("hono").Context<{ Bindings: Env }>) {
+  const spaResponse = await c.env.ASSETS.fetch(
+    new Request("https://assets/index.html"),
+  );
+  const html = await spaResponse.text();
+  return c.html(html);
+}
 
-// Login page
-app.get("/login", (c) => {
-  return c.html(getLoginPage());
-});
-
-// Home page
-app.get("/home", (c) => {
-  return c.html(getHomePage());
-});
-
-// Search results page
-app.get("/search", (c) => {
-  return c.html(getSearchPage());
-});
-
-// Explore page
-app.get("/explore", (c) => {
-  return c.html(getExplorePage());
-});
-
-// Notifications page
-app.get("/notifications", (c) => {
-  return c.html(getNotificationsPage());
-});
-
-// Single post view
-app.get("/post/:id", (c) => {
-  const postId = c.req.param("id");
-  return c.html(getPostPage(postId));
-});
-
-// Settings page
-app.get("/settings", (c) => {
-  return c.html(getSettingsPage());
-});
-
-app.get("/settings/muted", (c) => {
-  return c.html(getMutedSettingsPage());
-});
-
-// Admin Dashboard
-app.get("/admin", (c) => {
-  return c.html(getAdminPage());
-});
-
-// Public profile page - MUST be before API routes to avoid conflicts
-app.get("/u/:handle", (c) => {
-  const handle = c.req.param("handle");
-  return c.html(getProfilePage(handle));
-});
-
-// Followers page
-app.get("/u/:handle/followers", (c) => {
-  const handle = c.req.param("handle");
-  return c.html(getFollowersPage(handle));
-});
-
-// Following page
-app.get("/u/:handle/following", (c) => {
-  const handle = c.req.param("handle");
-  return c.html(getFollowingPage(handle));
-});
+// React SPA routes - all handled by client-side router
+app.get("/signup", (c) => serveSPA(c));
+app.get("/login", (c) => serveSPA(c));
+app.get("/home", (c) => serveSPA(c));
+app.get("/search", (c) => serveSPA(c));
+app.get("/explore", (c) => serveSPA(c));
+app.get("/notifications", (c) => serveSPA(c));
+app.get("/post/:id", (c) => serveSPA(c));
+app.get("/settings", (c) => serveSPA(c));
+app.get("/settings/muted", (c) => serveSPA(c));
+app.get("/admin", (c) => serveSPA(c));
+app.get("/u/:handle", (c) => serveSPA(c));
+app.get("/u/:handle/followers", (c) => serveSPA(c));
+app.get("/u/:handle/following", (c) => serveSPA(c));
 
 // API version info
 app.get("/api", (c) => {
@@ -271,6 +214,8 @@ app.route("/api/notifications", notificationsRoutes);
 // Mount unfurl routes (URL metadata extraction)
 app.route("/api/unfurl", unfurlRoutes);
 
+app.route("/api/batch", batchRoutes);
+
 // Mount seed routes (DEBUG ONLY - remove in production)
 app.route("/debug", seedRoutes);
 
@@ -289,8 +234,7 @@ app.get("/js/api.js", (_c) => {
   });
 });
 
-// 404 fallback - return HTML for browser requests, JSON for API requests
-app.notFound((c) => {
+app.notFound(async (c) => {
   const path = new URL(c.req.url).pathname;
   const isApiRequest = path.startsWith("/api/");
 
@@ -298,45 +242,11 @@ app.notFound((c) => {
     return c.json({ success: false, error: "Not found" }, 404);
   }
 
-  return c.html(
-    `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>404 - The Wire</title>
-  <link rel="stylesheet" href="/css/styles.css?v=2">
-</head>
-<body>
-  <div class="container">
-    <div style="text-align: center; padding: 4rem 0;">
-      <h1 style="font-size: 6rem; margin-bottom: 1rem;">404</h1>
-      <h2 style="margin-bottom: 2rem;">Page Not Found</h2>
-      <p class="text-muted" style="margin-bottom: 2rem;">The page you're looking for doesn't exist.</p>
-      <a href="/" class="cta" style="display: inline-block; padding: 1rem 2rem; background: linear-gradient(135deg, #00d9ff 0%, #0077ff 100%); color: #fff; text-decoration: none; border-radius: 50px; font-weight: 600;">Go Home</a>
-    </div>
-  </div>
-  <script>
-    const bottomNav = document.getElementById('bottom-nav');
-    let lastScrollY = window.scrollY;
-    if (bottomNav) {
-      window.addEventListener('scroll', () => {
-        const currentScrollY = window.scrollY;
-        if (currentScrollY > lastScrollY && currentScrollY > 50) {
-          bottomNav.classList.add('hidden');
-        } else if (currentScrollY < lastScrollY) {
-          bottomNav.classList.remove('hidden');
-        }
-        lastScrollY = currentScrollY;
-      });
-    }
-  </script>
-</body>
-</html>
-  `,
-    404,
+  const spaResponse = await c.env.ASSETS.fetch(
+    new Request("https://assets/index.html"),
   );
+  const html = await spaResponse.text();
+  return c.html(html);
 });
 
 // Error handler with structured logging
@@ -522,6 +432,9 @@ async function scheduledHandler(
 ): Promise<void> {
   await handleScheduled(event, env, ctx);
 }
+
+// Export app for testing
+export { app };
 
 // Export for Cloudflare Workers - all handlers in one object
 export default {

@@ -442,10 +442,13 @@ if (typeof window !== 'undefined') {
       // Fetch initial unread count
       notificationBadge.fetch();
 
-      // Connect WebSocket and listen for notifications
+      // Connect WebSocket and listen for notifications and new posts
       ws.connect();
       ws.on('notification', function(data) {
         notificationBadge.increment();
+      });
+      ws.on('new_post', function(data) {
+        window.dispatchEvent(new CustomEvent('wire:new_post', { detail: data.post }));
       });
 
       // If on notifications page, mark all as read after a short delay

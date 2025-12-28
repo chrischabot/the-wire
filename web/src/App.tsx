@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "./stores/authStore";
+import { useWebSocket } from "./lib/useWebSocket";
 import {
   HomePage,
   ExplorePage,
@@ -7,6 +8,8 @@ import {
   ProfilePage,
   PostPage,
   SettingsPage,
+  MutedWordsPage,
+  AdminPage,
   LoginPage,
   SignupPage,
   SearchPage,
@@ -20,6 +23,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
+  useWebSocket();
+
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/home" replace />} />
@@ -54,6 +59,22 @@ export function App() {
         element={
           <ProtectedRoute>
             <SettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings/muted"
+        element={
+          <ProtectedRoute>
+            <MutedWordsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminPage />
           </ProtectedRoute>
         }
       />

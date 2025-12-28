@@ -15,7 +15,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "space-around",
     padding: "0 16px",
-    zIndex: 1000,
+    zIndex: 50,
   } as React.CSSProperties,
   navItem: {
     display: "flex",

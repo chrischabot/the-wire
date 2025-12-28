@@ -106,35 +106,13 @@ export function FollowListPage() {
     enabled: !!handle && listType === "following",
   });
 
-  const userHandles =
+  const users: UserProfile[] =
     listType === "followers"
-      ? (followersData?.data?.followers?.map((f) => f.handle) ?? [])
-      : (followingData?.data?.following?.map((f) => f.handle) ?? []);
+      ? (followersData?.data?.followers ?? [])
+      : (followingData?.data?.following ?? []);
 
-  const { data: profilesData, isLoading: isProfilesLoading } = useQuery({
-    queryKey: [`${listType}-profiles`, handle, userHandles.join(",")],
-    queryFn: async () => {
-      const profiles: UserProfile[] = [];
-      for (const userHandle of userHandles) {
-        try {
-          const response = await usersApi.getProfile(userHandle);
-          if (response.data) {
-            profiles.push(response.data);
-          }
-        } catch {
-          /* skip failed profile fetches */
-        }
-      }
-      return profiles;
-    },
-    enabled: userHandles.length > 0,
-  });
-
-  const users = profilesData ?? [];
-  const isListLoading =
-    listType === "followers" ? isFollowersLoading : isFollowingLoading;
   const isLoading =
-    isListLoading || (userHandles.length > 0 && isProfilesLoading);
+    listType === "followers" ? isFollowersLoading : isFollowingLoading;
 
   const handleBack = () => {
     navigate(`/u/${handle}`);

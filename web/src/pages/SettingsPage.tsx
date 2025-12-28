@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Camera } from "lucide-react";
 import { AppLayout } from "../components/layout";
@@ -209,6 +210,7 @@ const styles = {
 };
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentTheme = useThemeStore((s) => s.current);
   const setTheme = useThemeStore((s) => s.setTheme);
@@ -336,7 +338,7 @@ export function SettingsPage() {
       /* intentionally empty */
     }
     logout();
-    window.location.href = "/login";
+    navigate("/login");
   };
 
   const rightSidebar = (
@@ -351,7 +353,7 @@ export function SettingsPage() {
   );
 
   return (
-    <AppLayout showPostButton={true} rightSidebar={rightSidebar}>
+    <AppLayout showPostButton={false} rightSidebar={rightSidebar}>
       <div className="page-header">
         <h2>Settings</h2>
       </div>

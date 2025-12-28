@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { AppLayout } from "../components/layout";
 import { PostCard } from "../components/posts";
@@ -12,7 +13,7 @@ const styles = {
     top: 0,
     background: "rgba(var(--background-rgb, 254, 254, 254), 0.85)",
     backdropFilter: "blur(12px)",
-    zIndex: 100,
+    zIndex: 10,
   } as React.CSSProperties,
   pageTitle: {
     fontSize: "20px",
@@ -68,6 +69,7 @@ const spinnerKeyframes = `
 `;
 
 export function ExplorePage() {
+  const navigate = useNavigate();
   const {
     data,
     fetchNextPage,
@@ -123,7 +125,7 @@ export function ExplorePage() {
           if (e.key === "Enter") {
             const value = (e.target as HTMLInputElement).value.trim();
             if (value.length >= 2) {
-              window.location.href = `/search?q=${encodeURIComponent(value)}`;
+              navigate(`/search?q=${encodeURIComponent(value)}`);
             }
           }
         }}

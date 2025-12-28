@@ -94,7 +94,7 @@ export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") || "";
   const [query, setQuery] = useState(initialQuery);
-  const [activeTab, setActiveTab] = useState<"all" | "users" | "posts">("all");
+  const [activeTab, setActiveTab] = useState<"top" | "people" | "posts">("top");
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["search", initialQuery, activeTab],
@@ -109,7 +109,7 @@ export function SearchPage() {
     }
   };
 
-  const users = data?.data?.users ?? [];
+  const people = data?.data?.people ?? [];
   const posts = data?.data?.posts ?? [];
 
   return (
@@ -141,22 +141,22 @@ export function SearchPage() {
             <button
               style={{
                 ...styles.tab,
-                ...(activeTab === "all" ? styles.tabActive : {}),
+                ...(activeTab === "top" ? styles.tabActive : {}),
               }}
-              onClick={() => setActiveTab("all")}
+              onClick={() => setActiveTab("top")}
             >
-              All
-              {activeTab === "all" && <div style={styles.tabIndicator} />}
+              Top
+              {activeTab === "top" && <div style={styles.tabIndicator} />}
             </button>
             <button
               style={{
                 ...styles.tab,
-                ...(activeTab === "users" ? styles.tabActive : {}),
+                ...(activeTab === "people" ? styles.tabActive : {}),
               }}
-              onClick={() => setActiveTab("users")}
+              onClick={() => setActiveTab("people")}
             >
-              Users
-              {activeTab === "users" && <div style={styles.tabIndicator} />}
+              People
+              {activeTab === "people" && <div style={styles.tabIndicator} />}
             </button>
             <button
               style={{
@@ -183,22 +183,22 @@ export function SearchPage() {
 
             {!isLoading && !isError && (
               <>
-                {(activeTab === "all" || activeTab === "users") &&
-                  users.length > 0 && (
+                {(activeTab === "top" || activeTab === "people") &&
+                  people.length > 0 && (
                     <div style={styles.section}>
-                      {activeTab === "all" && (
-                        <h3 style={styles.sectionTitle}>Users</h3>
+                      {activeTab === "top" && (
+                        <h3 style={styles.sectionTitle}>People</h3>
                       )}
-                      {users.map((user) => (
+                      {people.map((user) => (
                         <UserCard key={user.id} user={user} />
                       ))}
                     </div>
                   )}
 
-                {(activeTab === "all" || activeTab === "posts") &&
+                {(activeTab === "top" || activeTab === "posts") &&
                   posts.length > 0 && (
                     <div style={styles.section}>
-                      {activeTab === "all" && (
+                      {activeTab === "top" && (
                         <h3 style={styles.sectionTitle}>Posts</h3>
                       )}
                       {posts.map((post) => (
@@ -207,7 +207,7 @@ export function SearchPage() {
                     </div>
                   )}
 
-                {users.length === 0 && posts.length === 0 && (
+                {people.length === 0 && posts.length === 0 && (
                   <div style={styles.emptyState}>
                     No results found for "{initialQuery}"
                   </div>

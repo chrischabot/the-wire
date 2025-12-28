@@ -1,700 +1,643 @@
-# The Wire - Style Guide & Component Reference
+# The Wire - Complete Codebase Guide
 
-This document defines the UI patterns, reusable components, and best practices for maintaining consistency across The Wire application.
+A Twitter clone built on Cloudflare Workers with Durable Objects, KV, R2, and a React SPA frontend.
 
-## Design System Overview
+## Quick Reference
 
-The Wire uses a **shadcn/ui-inspired design system** with CSS custom properties for theming, consistent component patterns, and TypeScript-based shared renderers.
-
-### Architecture
-
-| Layer            | Location                                          | Purpose                               |
-| ---------------- | ------------------------------------------------- | ------------------------------------- |
-| CSS Variables    | `public/css/styles.css`, inline in `src/index.ts` | Theming, colors, spacing              |
-| Base Components  | `public/css/styles.css`                           | Reusable CSS classes                  |
-| Shared Renderers | `src/shared/*.ts`                                 | TypeScript component generation       |
-| Client JS        | `public/js/*.js`                                  | API client, form handling, validation |
-
----
-
-## CSS Variables & Theming
-
-### Color Palette
-
-All colors use CSS custom properties for theme support:
-
-```css
-:root {
-  /* Primary colors */
-  --primary: #4299e1;
-  --primary-foreground: #ffffff;
-  --primary-rgb: 66, 153, 225; /* For rgba() usage */
-
-  /* Secondary/neutral */
-  --secondary: #edf2f7;
-  --secondary-foreground: #2d3748;
-
-  /* Semantic colors */
-  --destructive: #f56565;
-  --destructive-foreground: #ffffff;
-  --success: #48bb78;
-
-  /* Surface colors */
-  --background: #fefefe;
-  --foreground: #2d3748;
-  --muted: #f7fafc;
-  --muted-foreground: #718096;
-  --border: #e2e8f0;
-  --hover: #f7fafc;
-  --accent: #bee3f8;
-  --accent-foreground: #2c5282;
-  --card: #fefefe;
-  --card-hover: #f7fafc;
-}
 ```
-
-### Spacing & Radius
-
-```css
-:root {
-  --radius: 16px; /* Default border radius */
-  --radius-sm: 12px; /* Small elements */
-  --radius-lg: 24px; /* Large elements, buttons */
-  --transition: all 0.2s ease;
-}
-```
-
-### Available Themes
-
-Set via `data-theme` attribute on root element:
-
-| Theme     | Character                | Primary Color |
-| --------- | ------------------------ | ------------- |
-| `twitter` | Classic Twitter blue     | `#1d9bf0`     |
-| `vega`    | Purple vibes             | `#8b5cf6`     |
-| `nova`    | Orange energy, compact   | `#f97316`     |
-| `maia`    | Soft & rounded (default) | `#4299e1`     |
-| `lyra`    | Green nature             | `#10b981`     |
-| `mira`    | Pink dream               | `#ec4899`     |
-
-Theme-specific overrides use attribute selectors:
-
-```css
-[data-theme="nova"] .post-button {
-  padding: 10px;
-  font-size: 15px;
-}
+npm run dev          # Start dev server on localhost:8080
+npm run typecheck    # TypeScript validation
+npm test             # Unit tests
+npm run test:api     # API integration tests
 ```
 
 ---
 
-## Button Components
+## Architecture Overview
 
-### Base Button Pattern
+### The Stack
 
-All buttons extend `.btn-base`:
+| Layer                     | Technology         | Purpose                                   |
+| ------------------------- | ------------------ | ----------------------------------------- |
+| **Runtime**               | Cloudflare Workers | Edge compute, HTTP routing                |
+| **Framework**             | Hono               | Lightweight routing, middleware           |
+| **State (Authoritative)** | Durable Objects    | User state, post interactions, feeds      |
+| **Cache (Global)**        | KV Namespaces      | Profiles, posts, sessions, search indexes |
+| **Media**                 | R2                 | Images, videos                            |
+| **Async**                 | Queues             | Post fanout to follower feeds             |
+| **Frontend**              | React + Vite       | SPA in `/web`                             |
 
-```css
-.btn-base {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: var(--radius);
-  font-weight: 500;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
-}
+### Data Flow Mental Model
+
+```
+User Request → Worker → KV (cache check) → Durable Object (authoritative) → Response
+                           ↓
+                    R2 (media files)
+                           ↓
+                    Queue (async fanout)
 ```
 
-### Button Variants
-
-| Class            | Usage               | Style                      |
-| ---------------- | ------------------- | -------------------------- |
-| `.btn-primary`   | Primary actions     | Solid primary color        |
-| `.btn-secondary` | Secondary actions   | Muted background           |
-| `.btn-outline`   | Tertiary actions    | Transparent with border    |
-| `.btn-ghost`     | Subtle actions      | Transparent, hover reveals |
-| `.btn-danger`    | Destructive actions | Red/destructive color      |
-
-### Button Sizes
-
-| Class     | Padding          | Font Size  |
-| --------- | ---------------- | ---------- |
-| `.btn-sm` | `0.25rem 0.5rem` | `0.75rem`  |
-| (default) | `0.5rem 1rem`    | `0.875rem` |
-| `.btn-lg` | `0.75rem 1.5rem` | `1rem`     |
-
-### Specialized Buttons
-
-#### Post Button (Sidebar CTA)
-
-```html
-<button class="post-button">Post</button>
-```
-
-- Large, full-width in sidebar
-- Uses `--radius-lg` for extra rounding
-- Theme-specific padding variations
-
-#### Tweet/Submit Button (Compose)
-
-```html
-<button class="tweet-button" id="post-btn" disabled>Post</button>
-```
-
-- Medium size for inline use
-- Disabled state with `opacity: 0.5`
-
-#### Icon Button (Actions)
-
-```html
-<button class="icon-button">
-  <svg>...</svg>
-</button>
-```
-
-- Circular, 36x36px
-- Transparent background
-- Hover reveals accent color
-
-#### Follow Button
-
-```html
-<button class="follow-button">Follow</button>
-<button class="follow-button following">Following</button>
-```
-
-- Pill-shaped (`border-radius: 9999px`)
-- `.following` state shows outline style
-- Hover on `.following` shows destructive (unfollow) styling
+**Key insight**: KV is the read cache, DOs are the source of truth. Always write to DO first, then update KV cache.
 
 ---
 
-## Card Components
+## Cloudflare Primitives
 
-### Base Card Pattern
+### KV Namespaces
 
-```css
-.card-base {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 1rem;
-  transition: background-color 0.2s ease;
-}
+Global eventually-consistent key-value store. Fast reads (~1ms), slower writes (propagation delay).
 
-.card-base:hover {
-  background: var(--card-hover);
-}
-```
+| Namespace     | Purpose              | Key Patterns                                                            |
+| ------------- | -------------------- | ----------------------------------------------------------------------- |
+| `USERS_KV`    | User data            | `user:{userId}`, `handle:{handle}`, `profile:{handle}`, `email:{email}` |
+| `POSTS_KV`    | Post data            | `post:{postId}`, `user-posts:{userId}`, `replies:{postId}`, `search:*`  |
+| `SESSIONS_KV` | Auth & notifications | `session:{token}`, `notifications:{userId}:*`                           |
+| `FEEDS_KV`    | Feed caches          | `feed:{userId}`, `explore:ranked`                                       |
 
-### Post Card
-
-**HTML Structure:**
-
-```html
-<div class="post-card" data-post-id="123">
-  <div class="post-header">
-    <a href="/u/handle"><img class="avatar" src="..." alt="" /></a>
-    <div class="post-body">
-      <div class="post-header-top">
-        <div class="post-author-row">
-          <a class="post-author">Display Name</a>
-          <a class="post-handle">@handle</a>
-          <span class="post-timestamp">2h</span>
-        </div>
-        <div class="post-menu-container"><!-- Dropdown --></div>
-      </div>
-      <div class="post-content">Post text here...</div>
-      <!-- Optional: .post-media, .link-card-container, .quoted-post -->
-      <div class="post-actions"><!-- Like, repost, reply buttons --></div>
-    </div>
-  </div>
-</div>
-```
-
-**Key Classes:**
-
-- `.post-card` - Clickable card container
-- `.post-author` - Bold display name
-- `.post-handle` - Muted @username
-- `.post-timestamp` - Preceded by `·` via CSS
-- `.post-content` - Preserves whitespace (`white-space: pre-wrap`)
-
-### User Card
-
-```html
-<div class="user-card" onclick="...">
-  <img class="user-card-avatar" src="..." alt="" />
-  <div class="user-card-content">
-    <div class="user-card-header">
-      <span class="user-card-name">Display Name</span>
-      <span class="follows-you-badge">Follows you</span>
-    </div>
-    <div class="user-card-handle">@handle</div>
-    <div class="user-card-bio">Bio text...</div>
-  </div>
-  <div class="user-card-actions">
-    <button class="follow-button">Follow</button>
-  </div>
-</div>
-```
-
-### Quoted Post
-
-```html
-<div class="quoted-post">
-  <div class="quoted-post-header">
-    <span class="quoted-post-author">Name</span>
-    <span class="quoted-post-handle">@handle</span>
-  </div>
-  <div class="quoted-post-content">Content...</div>
-  <div class="quoted-post-media"><!-- Optional media --></div>
-</div>
-```
-
----
-
-## Avatar System
-
-### Size Classes
-
-| Class               | Dimensions | Use Case                     |
-| ------------------- | ---------- | ---------------------------- |
-| `.avatar-xs`        | 24x24px    | Inline mentions              |
-| `.avatar-sm`        | 32x32px    | Compact lists, notifications |
-| `.avatar` (default) | 48x48px    | Post cards, user cards       |
-| `.avatar-lg`        | 148px      | Profile header               |
-| `.avatar-xl`        | 64x64px    | Large displays               |
-| `.avatar-2xl`       | 128x128px  | Settings                     |
-
-### Avatar Pattern
-
-```css
-.avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-  background: var(--muted); /* Placeholder color */
-}
-```
-
-### Zoomable Avatars
-
-Add `media-zoomable` class and data attributes for lightbox support:
-
-```html
-<img
-  src="..."
-  class="avatar media-zoomable"
-  data-fullsrc="..."
-  data-zoomable="true"
-  onclick="event.stopPropagation()"
-/>
-```
-
----
-
-## Rich Media Rendering
-
-### Post Media (Images/Videos)
-
-```html
-<div class="post-media">
-  <img
-    src="..."
-    class="post-media-item media-zoomable"
-    data-fullsrc="..."
-    data-zoomable="true"
-    alt="Post media"
-  />
-  <!-- OR -->
-  <video src="..." controls class="post-media-item"></video>
-</div>
-```
-
-**Styles:**
-
-```css
-.post-media {
-  margin-top: 12px;
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.post-media-item {
-  width: 100%;
-  max-height: 500px;
-  object-fit: cover;
-}
-```
-
-### Link Cards (Twitter/Open Graph)
-
-**Structure with image:**
-
-```html
-<a href="..." class="link-card" target="_blank" rel="noopener noreferrer">
-  <img src="..." class="link-card-image" alt="" />
-  <div class="link-card-body">
-    <div class="link-card-domain"><svg>...</svg> example.com</div>
-    <div class="link-card-title">Page Title</div>
-    <div class="link-card-description">Description text...</div>
-  </div>
-</a>
-```
-
-**Small variant (summary card):**
-
-```html
-<a href="..." class="link-card link-card-small">
-  <img src="..." class="link-card-image" alt="" />
-  <div class="link-card-body">...</div>
-</a>
-```
-
-**Container for lazy loading:**
-
-```html
-<div class="link-card-container" data-url="https://..."></div>
-```
-
-### YouTube Embeds
-
-Detected automatically from URLs containing `youtube.com/watch?v=` or `youtu.be/`:
-
-```html
-<div class="youtube-embed">
-  <iframe
-    src="https://www.youtube.com/embed/VIDEO_ID"
-    frameborder="0"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-    allowfullscreen
-  ></iframe>
-</div>
-```
-
-**Styles:**
-
-```css
-.youtube-embed {
-  margin-top: 12px;
-  border-radius: 16px;
-  overflow: hidden;
-  aspect-ratio: 16 / 9;
-}
-```
-
-### Loading Link Cards
-
-Use the `loadLinkCards()` function to process `.link-card-container` elements:
-
-```javascript
-async function loadLinkCards() {
-  const containers = document.querySelectorAll(
-    ".link-card-container[data-url]",
-  );
-  for (const container of containers) {
-    const url = container.getAttribute("data-url");
-
-    // Check for YouTube first
-    const youtubeId = getYouTubeId(url);
-    if (youtubeId) {
-      container.innerHTML = renderYouTubeEmbed(youtubeId);
-      continue;
-    }
-
-    // Fetch unfurl data
-    const response = await fetch("/api/unfurl?url=" + encodeURIComponent(url));
-    if (response.ok) {
-      const result = await response.json();
-      if (result.success && result.data) {
-        container.innerHTML = renderLinkCard(result.data, url);
-      }
-    }
-  }
-}
-```
-
----
-
-## Shared TypeScript Renderers
-
-### Post Renderer (`src/shared/post-renderer.ts`)
-
-**Configuration Interface:**
+**Critical KV Key Patterns**:
 
 ```typescript
-interface PostRenderConfig {
-  showDropdownMenu?: boolean; // Show ... menu
-  showInteractiveActions?: boolean; // Enable like/repost/reply
-  enableLinkCards?: boolean; // Auto-unfurl URLs
-  enableYouTubeEmbeds?: boolean; // Embed YouTube videos
-  showRepostIndicator?: boolean; // Show "X reposted" header
-  containerId: string; // Target container ID
-  currentUserHandle?: string; // For ownership checks
-  currentUserId?: string;
+// Users
+`user:{userId}` // { id, email, handle, passwordHash, createdAt }
+`handle:{handle}` // userId (lookup by handle)
+`email:{email}` // userId (lookup by email)
+`profile:{handle}` // Full UserProfile (cached from UserDO)
+// Posts
+`post:{postId}` // PostMetadata (full post data with author info)
+`user-posts:{userId}` // string[] of postIds (author's post index)
+`replies:{postId}` // string[] of reply postIds
+// Search indexes
+`search:handle:{prefix}` // string[] of userIds matching prefix
+`search:word:{word}:{postId}`; // Post search index
+```
+
+### Durable Objects
+
+Single-threaded, strongly consistent per-instance. Each user/post/feed has its own DO.
+
+| DO            | ID Pattern           | Responsibilities                                                   |
+| ------------- | -------------------- | ------------------------------------------------------------------ |
+| `UserDO`      | `idFromName(userId)` | Profile, settings, following/followers, blocked users, liked posts |
+| `PostDO`      | `idFromName(postId)` | Like/repost tracking, interaction counts                           |
+| `FeedDO`      | `idFromName(userId)` | User's personalized feed entries                                   |
+| `WebSocketDO` | `idFromName(userId)` | Real-time notification delivery                                    |
+
+**DO Internal State** (stored in durable storage):
+
+```typescript
+// UserDO state
+{
+  profile: UserProfile,
+  settings: UserSettings,
+  following: Set<string>,      // userIds
+  followers: Set<string>,      // userIds
+  blocked: Set<string>,        // userIds
+  likedPostsSet: Set<string>,  // postIds (O(1) lookup!)
+  repostedPostsSet: Set<string>
+}
+
+// PostDO state
+{
+  post: Post,
+  likesSet: Set<string>,       // userIds who liked
+  repostsSet: Set<string>      // userIds who reposted
+}
+
+// FeedDO state
+{
+  entries: FeedEntry[]  // { postId, authorId, timestamp, source }
 }
 ```
 
-**Usage:**
+**Critical Pattern**: DOs use `Set<T>` internally for O(1) membership checks, but serialize to arrays for storage (JSON compatibility).
+
+### R2 (Object Storage)
 
 ```typescript
-import { getCompletePostScript } from "./shared/post-renderer";
+// Upload
+await env.MEDIA_BUCKET.put(key, file, { httpMetadata: { contentType } });
 
-const script = getCompletePostScript({
-  containerId: "posts-feed",
-  showDropdownMenu: true,
-  showInteractiveActions: true,
-  enableLinkCards: true,
-  currentUserHandle: user.handle,
-  currentUserId: user.id,
+// Serve (via handler)
+const object = await env.MEDIA_BUCKET.get(key);
+return new Response(object.body, { headers: { "Content-Type": contentType } });
+```
+
+### Queues
+
+Used for fanout when posting:
+
+```typescript
+// Producer (posts.ts)
+await env.FANOUT_QUEUE.send({
+  type: "new-post",
+  postId,
+  authorId,
+  timestamp,
+});
+
+// Consumer (index.ts queue handler)
+// Adds post to each follower's FeedDO
+```
+
+---
+
+## File Structure
+
+```
+src/
+├── index.ts                 # Worker entry, route mounting, queue consumer
+├── constants.ts             # LIMITS, CACHE_TTL, SCORING, BATCH_SIZE
+├── styles.ts                # Inline CSS for SSR pages
+│
+├── durable-objects/
+│   ├── UserDO.ts           # User state, social graph, settings
+│   ├── PostDO.ts           # Post interactions (likes, reposts)
+│   ├── FeedDO.ts           # Per-user feed management
+│   └── WebSocketDO.ts      # Real-time connections
+│
+├── handlers/
+│   ├── auth.ts             # Signup, login, password reset
+│   ├── users.ts            # Profile CRUD, follow/block
+│   ├── posts.ts            # Create, like, repost, delete, thread/replies
+│   ├── feed.ts             # Home feed, explore, chronological
+│   ├── search.ts           # User and post search
+│   ├── notifications.ts    # Notification list, mark read
+│   ├── media.ts            # Upload/serve images and videos
+│   ├── batch.ts            # Batch API endpoints
+│   ├── admin.ts            # Admin dashboard, user/post management
+│   ├── moderation.ts       # Ban, takedown
+│   ├── seed.ts             # Dev seeding (AI-generated content)
+│   ├── scheduled.ts        # Cron jobs (ranking updates, cleanup)
+│   └── unfurl.ts           # Link preview metadata extraction
+│
+├── middleware/
+│   ├── auth.ts             # requireAuth, optionalAuth, getJwtSecret
+│   ├── csrf.ts             # Origin validation
+│   └── rate-limit.ts       # KV-based rate limiting
+│
+├── services/
+│   ├── notifications.ts    # Notification CRUD helpers
+│   ├── kv-client.ts        # KV helper utilities
+│   └── snowflake.ts        # Snowflake ID generation
+│
+├── shared/                  # SSR component renderers (legacy pages)
+│   ├── post-renderer.ts
+│   ├── user-renderer.ts
+│   ├── sidebar-renderer.ts
+│   └── bottom-nav.ts
+│
+├── types/
+│   ├── env.ts              # Env interface with all bindings
+│   ├── user.ts             # UserProfile, UserSettings
+│   ├── post.ts             # Post, PostMetadata
+│   ├── feed.ts             # FeedEntry
+│   └── notification.ts     # Notification types
+│
+└── utils/
+    ├── batch.ts            # batchKVGet, batchInChunks, sanitizeIds
+    ├── crypto.ts           # Password hashing (scrypt)
+    ├── jwt.ts              # Token creation/verification
+    ├── validation.ts       # Input validation helpers
+    ├── response.ts         # success(), notFound(), serverError()
+    ├── safe-parse.ts       # safeJsonParse, safeAtob
+    ├── search-index.ts     # Tokenization, indexing
+    └── logger.ts           # Structured logging
+
+web/                         # React SPA (Vite)
+├── src/
+│   ├── App.tsx             # Router setup
+│   ├── main.tsx            # Entry point
+│   ├── components/
+│   │   ├── layout/         # AppLayout, Sidebar, BottomNav
+│   │   ├── posts/          # PostCard, ComposeBox
+│   │   └── users/          # UserCard, FollowButton
+│   ├── pages/              # Route components
+│   ├── lib/
+│   │   ├── api.ts          # API client with typed methods
+│   │   ├── queryClient.ts  # React Query setup
+│   │   └── websocket.ts    # WebSocket connection
+│   ├── stores/
+│   │   ├── authStore.ts    # Zustand auth state
+│   │   └── themeStore.ts   # Theme persistence
+│   └── utils/
+│       └── format.ts       # formatTimeAgo, linkifyContent
+└── index.html
+```
+
+---
+
+## Batching Patterns (Critical!)
+
+### The N+1 Problem
+
+**BAD** - Sequential reads in a loop:
+
+```typescript
+for (const id of userIds) {
+  const user = await env.USERS_KV.get(`user:${id}`); // N requests!
+}
+```
+
+**GOOD** - Batched parallel reads:
+
+```typescript
+import { batchKVGet } from "../utils/batch";
+
+const keys = userIds.map((id) => `user:${id}`);
+const userMap = await batchKVGet(env, keys, "USERS_KV", {
+  parse: (val) => (val ? JSON.parse(val) : null),
+});
+
+for (const id of userIds) {
+  const user = userMap.get(`user:${id}`);
+}
+```
+
+### batchKVGet Usage
+
+```typescript
+// Signature
+batchKVGet<T>(
+  env: Env,
+  keys: string[],
+  namespace: 'USERS_KV' | 'POSTS_KV' | 'SESSIONS_KV' | 'FEEDS_KV',
+  options?: { parse?: (val: string | null) => T | null }
+): Promise<Map<string, T | null>>
+
+// Example: Fetch multiple profiles
+const handles = ['alice', 'bob', 'carol'];
+const profileKeys = handles.map(h => `profile:${h}`);
+const profileMap = await batchKVGet<UserProfile>(env, profileKeys, 'USERS_KV', {
+  parse: (val) => val ? JSON.parse(val) : null
 });
 ```
 
-### User Renderer (`src/shared/user-renderer.ts`)
+### Cloudflare Limits to Remember
+
+| Limit                  | Value | Mitigation                        |
+| ---------------------- | ----- | --------------------------------- |
+| Concurrent subrequests | 6     | `batchKVGet` chunks automatically |
+| Total subrequests      | 1000  | Paginate, limit batch sizes       |
+| KV value size          | 25MB  | Chunk large data                  |
+| DO request timeout     | 30s   | Keep operations fast              |
+
+---
+
+## Common Pitfalls & Fixes
+
+### 1. Profile Key Mismatch
+
+**Bug**: Search index stores `userId`, but profiles are keyed by `handle`.
 
 ```typescript
-interface UserCardConfig {
-  showFollowButton?: boolean;
-  showFollowsYouBadge?: boolean;
-  currentUserId?: string;
+// WRONG
+const profileKeys = userIds.map(id => `profile:${id}`);
+
+// RIGHT - need two-step lookup
+const userKeys = userIds.map(id => `user:${id}`);
+const userMap = await batchKVGet(env, userKeys, 'USERS_KV', ...);
+const handles = [...userMap.values()].map(u => u?.handle).filter(Boolean);
+const profileKeys = handles.map(h => `profile:${h}`);
+```
+
+### 2. Repost Missing createdAt
+
+When creating reposts, include `createdAt` in `originalPost`:
+
+```typescript
+originalPost: {
+  id: original.id,
+  authorHandle: original.authorHandle,
+  // ... other fields
+  createdAt: original.createdAt,  // Don't forget!
+  likeCount: original.likeCount,
+  replyCount: original.replyCount,
+  repostCount: original.repostCount,
 }
 ```
 
-### Sidebar Renderer (`src/shared/sidebar-renderer.ts`)
+Frontend fallback: `displayPost.createdAt || post.createdAt`
+
+### 3. Array vs Set in DOs
+
+**Problem**: `array.includes()` is O(n), slow for popular posts.
+
+**Solution**: Use Sets internally, serialize to arrays for storage:
 
 ```typescript
-interface SidebarConfig {
-  activePage?:
-    | "home"
-    | "explore"
-    | "notifications"
-    | "profile"
-    | "settings"
-    | "admin";
-  showPostButton?: boolean;
-  postButtonOnClick?: string;
-  showAdminNav?: boolean;
+// PostDO
+interface PostStateRuntime {
+  post: Post;
+  likesSet: Set<string>; // O(1) has/add/delete
+  repostsSet: Set<string>;
+}
+
+// On load: convert array → Set
+this.state = {
+  post: stored.post,
+  likesSet: new Set(stored.likes || []),
+  repostsSet: new Set(stored.reposts || []),
+};
+
+// On save: convert Set → array
+const toStore = {
+  post: this.state.post,
+  likes: [...this.state.likesSet],
+  reposts: [...this.state.repostsSet],
+};
+```
+
+### 4. Pagination Counting Bug
+
+**Problem**: Counting only from paginated slice gives wrong totals.
+
+```typescript
+// WRONG - counts only current page
+const paginatedIds = allIds.slice(offset, offset + limit);
+let unreadCount = 0;
+for (const id of paginatedIds) {
+  if (!notif.read) unreadCount++;  // Undercounts!
+}
+
+// RIGHT - count from all, return subset
+const allNotifs = await batchKVGet(env, allKeys, ...);
+let unreadCount = 0;
+for (const notif of allNotifs.values()) {
+  if (notif && !notif.read) unreadCount++;
+}
+// Then paginate the response array separately
+```
+
+### 5. Client-Side Request Deduplication
+
+For link unfurling, cache results to avoid duplicate requests:
+
+```typescript
+const unfurlCache = new Map<string, UnfurlData | null>();
+const unfurlPending = new Map<string, Promise<UnfurlData | null>>();
+
+async function fetchUnfurl(url: string) {
+  if (unfurlCache.has(url)) return unfurlCache.get(url);
+  if (unfurlPending.has(url)) return unfurlPending.get(url);
+
+  const promise = doFetch(url);
+  unfurlPending.set(url, promise);
+  const result = await promise;
+  unfurlCache.set(url, result);
+  unfurlPending.delete(url);
+  return result;
 }
 ```
 
 ---
 
-## Post Actions Pattern
+## API Patterns
 
-### Action Button Structure
+### Response Format
 
-```html
-<div class="post-actions">
-  <span class="post-action" data-action="reply" data-post-id="123">
-    <svg><!-- Reply icon --></svg>
-    <span class="reply-count">5</span>
-  </span>
-  <span class="post-action reposted" data-action="repost" data-post-id="123">
-    <svg><!-- Repost icon --></svg>
-    <span class="repost-count">12</span>
-  </span>
-  <span class="post-action liked" data-action="like" data-post-id="123">
-    <svg><!-- Heart icon --></svg>
-    <span class="like-count">42</span>
-  </span>
-</div>
+All API responses follow this structure:
+
+```typescript
+// Success
+{ success: true, data: { ... } }
+
+// Error
+{ success: false, error: "Error message" }
+
+// Paginated
+{ success: true, data: { items: [...], nextCursor: "...", hasMore: true } }
 ```
 
-### Active States
+### Authentication
 
-| Class       | Color             | Use               |
-| ----------- | ----------------- | ----------------- |
-| `.liked`    | `#F91880` (pink)  | User has liked    |
-| `.reposted` | `#00BA7C` (green) | User has reposted |
+```typescript
+// Middleware
+import { requireAuth, optionalAuth } from "../middleware/auth";
+
+// Protected route
+app.get("/api/me", requireAuth, async (c) => {
+  const userId = c.get("userId"); // Set by middleware
+});
+
+// Optional auth (different behavior for logged in)
+app.get("/api/posts/:id", optionalAuth, async (c) => {
+  const userId = c.get("userId"); // May be undefined
+});
+```
+
+### Handler Response Helpers
+
+```typescript
+import { success, notFound, badRequest, serverError } from "../utils/response";
+
+return success({ user: profile }); // 200
+return notFound("User not found"); // 404
+return badRequest("Invalid email"); // 400
+return serverError("Database error"); // 500
+```
 
 ---
 
-## Dropdown Menus
+## Frontend Architecture
 
-### Post Dropdown Pattern
+### React Query for Server State
 
-```html
-<div class="post-menu-container">
-  <button
-    class="post-more-btn"
-    onclick="toggleDropdown('123', 'handle', false)"
-  >
-    <svg><!-- ... icon --></svg>
-  </button>
-  <div class="post-dropdown" id="dropdown-123">
-    <button class="post-dropdown-item">
-      <svg>...</svg>
-      Follow @handle
-    </button>
-    <button class="post-dropdown-item destructive">
-      <svg>...</svg>
-      Block @handle
-    </button>
-  </div>
-</div>
+```typescript
+// Infinite scroll pattern (HomePage, ExplorePage, PostPage)
+const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  useInfiniteQuery({
+    queryKey: ["feed", "home"],
+    queryFn: ({ pageParam }) => feedApi.getHome(pageParam),
+    getNextPageParam: (lastPage) => lastPage?.nextCursor,
+    initialPageParam: undefined as string | undefined,
+  });
 
-<!-- Backdrop for closing -->
-<div class="dropdown-backdrop hidden" id="dropdown-backdrop"></div>
+const posts = data?.pages.flatMap((page) => page?.items ?? []) ?? [];
 ```
 
-### Dropdown Item Variants
+### Zustand for Client State
 
-- Default: Normal text color
-- `.destructive`: Red text, red hover background
-- `.follow-btn.following`: Muted color for "Unfollow" state
+```typescript
+// authStore.ts
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      user: null,
+      token: null,
+      setAuth: (user, token) => set({ user, token }),
+      logout: () => set({ user: null, token: null }),
+    }),
+    { name: "auth-storage" },
+  ),
+);
+```
+
+### API Client Pattern
+
+```typescript
+// web/src/lib/api.ts
+export const postsApi = {
+  async create(content: string, mediaUrls?: string[]) {
+    return apiRequest("/posts", {
+      method: "POST",
+      body: { content, mediaUrls },
+    });
+  },
+  async getReplies(postId: string, cursor?: string, limit = 20) {
+    let url = `/posts/${postId}/replies?limit=${limit}`;
+    if (cursor) url += `&cursor=${cursor}`;
+    return apiRequest(url);
+  },
+};
+```
 
 ---
 
-## Form Inputs
+## UI Design System
 
-### Base Input Style
+### Theming
+
+6 themes available via `data-theme` attribute:
+
+| Theme     | Primary Color | Character            |
+| --------- | ------------- | -------------------- |
+| `twitter` | `#1d9bf0`     | Classic Twitter blue |
+| `vega`    | `#8b5cf6`     | Purple               |
+| `nova`    | `#f97316`     | Orange, compact      |
+| `maia`    | `#4299e1`     | Soft blue (default)  |
+| `lyra`    | `#10b981`     | Green                |
+| `mira`    | `#ec4899`     | Pink                 |
+
+### CSS Variables
+
+Always use variables, never hardcode colors:
 
 ```css
-.input-base {
-  width: 100%;
-  padding: 0.75rem;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--foreground);
-  font-size: 1rem;
-  transition: border-color 0.2s ease;
-}
-
-.input-base:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.2);
-}
+color: var(--foreground);
+background: var(--background);
+border: 1px solid var(--border);
 ```
 
-### Form Group Pattern
+### Component Classes
 
-```html
-<div class="form-group">
-  <label for="email">Email</label>
-  <input
-    type="email"
-    id="email"
-    class="input-base"
-    placeholder="you@example.com"
-  />
-  <div class="error" id="email-error"></div>
-</div>
+| Component | Classes                                                                       | Notes                    |
+| --------- | ----------------------------------------------------------------------------- | ------------------------ |
+| Buttons   | `.btn-primary`, `.btn-secondary`, `.btn-outline`, `.btn-ghost`, `.btn-danger` | Extend `.btn-base`       |
+| Cards     | `.post-card`, `.user-card`                                                    | Use `.card-base` pattern |
+| Avatars   | `.avatar`, `.avatar-sm`, `.avatar-lg`                                         | Always include fallback  |
+| Actions   | `.post-action`, `.liked`, `.reposted`                                         | Pink/green active states |
+
+### Icons
+
+Use Lucide React icons:
+
+```tsx
+import { Heart, MessageSquare, Repeat2 } from "lucide-react";
+<Heart size={18} />;
 ```
 
 ---
 
-## Navigation Components
+## Testing
 
-### Left Sidebar (`sidebar-renderer.ts`)
+### Unit Tests (Vitest)
 
-```html
-<div class="sidebar-left">
-  <a href="/home" class="logo">
-    <span class="logo-text">The Wire</span>
-  </a>
-  <a href="/home" class="nav-item active">
-    <svg>...</svg>
-    <span>Home</span>
-  </a>
-  <!-- More nav items... -->
-  <button class="post-button">Post</button>
-</div>
+```bash
+npm test                    # Run unit tests
+npm test -- --watch        # Watch mode
 ```
 
-### Bottom Nav (Mobile) (`bottom-nav.ts`)
+Located in `tests/unit/`. Test utilities, crypto, validation.
 
-```html
-<nav class="bottom-nav" id="bottom-nav">
-  <a href="/home" class="bottom-nav-item">
-    <svg>...</svg>
-  </a>
-  <!-- More nav items... -->
-</nav>
+### API Integration Tests
+
+```bash
+npm run test:api           # Run API tests against local server
+```
+
+Located in `tests/api/`. Requires dev server running.
+
+### Visual Regression Tests
+
+```bash
+npx playwright test tests/visual/
+```
+
+Located in `tests/visual/`. Screenshot comparisons across themes.
+
+---
+
+## Development Workflow
+
+### Local Development
+
+```bash
+# Terminal 1: Start dev server
+npm run dev
+
+# Terminal 2: Start Vite frontend (if working on React)
+cd web && npm run dev
+```
+
+Dev server runs on `localhost:8080`. CSRF requires `Origin: http://localhost:8080` header for POST requests.
+
+### Adding a New Feature
+
+1. **Types first**: Add interfaces to `src/types/`
+2. **Handler**: Create/update handler in `src/handlers/`
+3. **Mount route**: Add to `src/index.ts`
+4. **Frontend**: Add API method to `web/src/lib/api.ts`
+5. **Component**: Create React component
+6. **Test**: Add tests
+
+### Deployment
+
+```bash
+npm run deploy             # Deploy to Cloudflare
 ```
 
 ---
 
-## Icons
+## Key Files to Know
 
-Use **Lucide icons** (stroke-based SVGs):
+| When working on...   | Read these files                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| Authentication       | `src/handlers/auth.ts`, `src/middleware/auth.ts`, `src/utils/jwt.ts`                  |
+| Feed algorithm       | `src/handlers/feed.ts`, `src/durable-objects/FeedDO.ts`, `src/constants.ts` (SCORING) |
+| User profiles        | `src/handlers/users.ts`, `src/durable-objects/UserDO.ts`                              |
+| Posts & interactions | `src/handlers/posts.ts`, `src/durable-objects/PostDO.ts`                              |
+| Search               | `src/handlers/search.ts`, `src/utils/search-index.ts`                                 |
+| Notifications        | `src/handlers/notifications.ts`, `src/services/notifications.ts`                      |
+| Batching             | `src/utils/batch.ts`, `src/handlers/batch.ts`                                         |
+| Frontend state       | `web/src/stores/`, `web/src/lib/api.ts`                                               |
+| UI components        | `web/src/components/`, `AGENTS.md` (design system)                                    |
 
-```html
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width="24"
-  height="24"
-  viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  stroke-width="2"
-  stroke-linecap="round"
-  stroke-linejoin="round"
->
-  <!-- Path data -->
-</svg>
+---
+
+## Constants Reference
+
+```typescript
+// src/constants.ts
+
+LIMITS.MAX_FEED_ENTRIES = 1000;
+LIMITS.MAX_NOTE_LENGTH = 280;
+LIMITS.DEFAULT_FEED_PAGE_SIZE = 20;
+LIMITS.MAX_PAGINATION_LIMIT = 50;
+
+CACHE_TTL.PROFILE = 3600; // 1 hour
+CACHE_TTL.FOF_RANKINGS = 900; // 15 minutes
+
+BATCH_SIZE.KV_LIST = 100; // KV list operations
 ```
 
-Standard sizes:
-
-- Navigation: 24x24 or 28x28
-- Post actions: 18x18
-- Small inline: 14x14 or 16x16
-
 ---
 
-## Best Practices
+## Checklist Before Committing
 
-### DO
-
-1. **Use CSS variables** for all colors, spacing, and radii
-2. **Extend base classes** (`.btn-base`, `.card-base`, `.avatar`)
-3. **Use semantic class names** (`.btn-danger`, not `.btn-red`)
-4. **Include hover and focus states** on all interactive elements
-5. **Use `event.stopPropagation()`** on nested clickable elements
-6. **Add `data-zoomable="true"`** to images that should be zoomable
-7. **Use the shared renderers** for posts and user cards
-8. **Match existing patterns** when adding new components
-
-### DON'T
-
-1. **Don't use hardcoded colors** - always use CSS variables
-2. **Don't create new button styles** without extending `.btn-base`
-3. **Don't skip hover states** on clickable elements
-4. **Don't use inline styles** for theming - use data-theme overrides
-5. **Don't duplicate rendering logic** - use shared TypeScript modules
-6. **Don't forget accessibility** - include alt text, ARIA labels
-7. **Don't break theme support** - test across all 6 themes
-
-### Adding New Components
-
-1. Define base styles in CSS with theme variable usage
-2. Add theme-specific overrides using `[data-theme='x'] .class`
-3. Create TypeScript renderer if component is used across pages
-4. Export configuration interface for customization
-5. Document in this file
-
----
-
-## File Reference
-
-| File                             | Purpose                                            |
-| -------------------------------- | -------------------------------------------------- |
-| `public/css/styles.css`          | Main stylesheet with base components               |
-| `src/index.ts` (CSS section)     | Inline CSS with theme overrides                    |
-| `src/shared/post-renderer.ts`    | Post card JavaScript generation                    |
-| `src/shared/user-renderer.ts`    | User card JavaScript generation                    |
-| `src/shared/sidebar-renderer.ts` | Navigation sidebar HTML                            |
-| `src/shared/bottom-nav.ts`       | Mobile bottom navigation                           |
-| `src/shared/utils.ts`            | Shared utilities (escapeHtml, formatTimeAgo, etc.) |
-| `src/handlers/unfurl.ts`         | URL metadata extraction for link cards             |
-| `public/js/api.js`               | Client-side API wrapper                            |
+- [ ] `npm run typecheck` passes
+- [ ] No N+1 queries (use `batchKVGet`)
+- [ ] DOs use Sets for membership checks
+- [ ] API responses use `success()` / error helpers
+- [ ] Frontend uses React Query for server state
+- [ ] CSS uses variables, not hardcoded colors
+- [ ] New endpoints have proper auth middleware

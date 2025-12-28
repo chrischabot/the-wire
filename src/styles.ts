@@ -38,6 +38,9 @@ export function getStyles(): string {
   --destructive-foreground: #FFFFFF;
   --hover: #16181C;
   --success: #00BA7C;
+  --like: #F91880;
+  --repost: #00BA7C;
+  --primary-alpha: rgba(29, 155, 240, 0.1);
   
   --radius: 16px;
   --radius-sm: 8px;
@@ -73,6 +76,9 @@ export function getStyles(): string {
   --destructive-foreground: #FFFFFF;
   --hover: #F8FAFC;
   --success: #10B981;
+  --like: #F91880;
+  --repost: #00BA7C;
+  --primary-alpha: rgba(15, 23, 42, 0.1);
   
   --radius: 8px;
   --radius-sm: 4px;
@@ -103,6 +109,9 @@ export function getStyles(): string {
   --destructive-foreground: #FFFFFF;
   --hover: #FAFAFA;
   --success: #16A34A;
+  --like: #F91880;
+  --repost: #00BA7C;
+  --primary-alpha: rgba(24, 24, 27, 0.1);
   
   --radius: 6px;
   --radius-sm: 3px;
@@ -133,6 +142,9 @@ export function getStyles(): string {
   --destructive-foreground: #FFFFFF;
   --hover: #F7FAFC;
   --success: #48BB78;
+  --like: #F91880;
+  --repost: #00BA7C;
+  --primary-alpha: rgba(66, 153, 225, 0.1);
   
   --radius: 16px;
   --radius-sm: 12px;
@@ -163,6 +175,9 @@ export function getStyles(): string {
   --destructive-foreground: #FFFFFF;
   --hover: #F5F5F5;
   --success: #00CC00;
+  --like: #F91880;
+  --repost: #00BA7C;
+  --primary-alpha: rgba(0, 0, 0, 0.1);
   
   --radius: 2px;
   --radius-sm: 0px;
@@ -195,6 +210,8 @@ export function getStyles(): string {
   --destructive-foreground: #FFFFFF;
   --hover: #FAFAFA;
   --success: #059669;
+  --like: #F91880;
+  --repost: #00BA7C;
   
   --radius: 4px;
   --radius-sm: 2px;
@@ -885,6 +902,7 @@ body {
   padding: 12px 16px;
   cursor: pointer;
   transition: var(--transition);
+  overflow: hidden;
 }
 
 [data-theme='nova'] .post-card,
@@ -1030,7 +1048,7 @@ body {
   border-radius: var(--radius);
   min-width: 220px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
+  z-index: 110;
   overflow: hidden;
   opacity: 0;
   visibility: hidden;
@@ -1088,7 +1106,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 999;
+  z-index: 100;
 }
 
 .dropdown-backdrop.hidden {
@@ -1147,6 +1165,7 @@ body {
   color: var(--foreground);
   margin-top: 2px;
   word-wrap: break-word;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
@@ -1173,6 +1192,17 @@ a.mention:visited {
 a.mention:hover,
 a.mention:active {
   text-decoration: underline !important;
+}
+
+/* Links in post content */
+.post-content a.link {
+  color: var(--primary);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.post-content a.link:hover {
+  text-decoration: underline;
 }
 
 /* Repost indicator */
@@ -1263,27 +1293,27 @@ a.mention:active {
 }
 
 .post-action.liked {
-  color: #F91880;
+  color: var(--like);
 }
 
 .post-action.liked svg {
-  fill: #F91880;
+  fill: var(--like);
 }
 
 .post-action.liked:hover {
-  background: rgba(249, 24, 128, 0.1);
+  background: color-mix(in srgb, var(--like) 10%, transparent);
 }
 
 .post-action.reposted {
-  color: #00BA7C;
+  color: var(--repost);
 }
 
 .post-action.reposted svg {
-  stroke: #00BA7C;
+  stroke: var(--repost);
 }
 
 .post-action.reposted:hover {
-  background: rgba(0, 186, 124, 0.1);
+  background: color-mix(in srgb, var(--repost) 10%, transparent);
 }
 
 /* ============================================
@@ -1413,22 +1443,8 @@ a.mention:active {
 }
 
 /* ============================================
-   USER CARDS (for followers/following lists)
+   USER CARDS - Legacy classes (used in admin.ts)
    ============================================ */
-.user-card {
-  display: flex;
-  gap: 12px;
-  padding: 16px;
-  border-bottom: 1px solid var(--border);
-  text-decoration: none;
-  color: inherit;
-  transition: var(--transition);
-}
-
-.user-card:hover {
-  background: var(--secondary);
-}
-
 .user-avatar {
   width: 48px;
   height: 48px;
@@ -2177,7 +2193,7 @@ small {
     height: 53px;
     background: var(--background);
     border-top: 1px solid var(--border);
-    z-index: 100;
+    z-index: 50;
     padding-bottom: env(safe-area-inset-bottom);
   }
   
@@ -2365,5 +2381,165 @@ button, a, .nav-item, .post-card, .tab, .icon-button {
   border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* ============================================
+   LANDING PAGE
+   ============================================ */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  background: var(--background);
+}
+
+.brand-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.logo-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--primary-foreground);
+}
+
+.logo-name {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.tagline {
+  font-size: 1.25rem;
+  color: var(--muted-foreground);
+  margin-bottom: 2rem;
+  max-width: 400px;
+}
+
+.cta {
+  display: inline-block;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 1rem 2rem;
+  border-radius: var(--radius-lg);
+  font-size: 1.125rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+.cta:hover {
+  opacity: 0.9;
+  transform: translateY(-2px);
+}
+
+.features {
+  display: flex;
+  gap: 2rem;
+  margin-top: 3rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.feature {
+  text-align: center;
+  max-width: 200px;
+}
+
+.feature h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--foreground);
+}
+
+.feature p {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+
+/* ============================================
+   QUOTED POST MEDIA
+   ============================================ */
+.quoted-post-media {
+  margin-top: 8px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.quoted-post-media-item {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  display: block;
+}
+
+/* ============================================
+   LINK CARD CONTENT (alternative layout)
+   ============================================ */
+.link-card-content {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ============================================
+   IMAGE MODAL
+   ============================================ */
+.image-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  cursor: zoom-out;
+}
+
+.image-modal img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+}
+
+.image-modal-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  transition: background 0.2s;
+}
+
+.image-modal-close:hover {
+  background: rgba(255, 255, 255, 0.2);
 }`;
 }

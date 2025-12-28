@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "../components/layout";
 import { ComposeBox, PostCard } from "../components/posts";
@@ -14,7 +15,7 @@ const styles = {
     top: 0,
     background: "rgba(var(--background-rgb, 254, 254, 254), 0.85)",
     backdropFilter: "blur(12px)",
-    zIndex: 100,
+    zIndex: 10,
   } as React.CSSProperties,
   pageTitle: {
     fontSize: "20px",
@@ -70,6 +71,7 @@ const spinnerKeyframes = `
 `;
 
 export function HomePage() {
+  const navigate = useNavigate();
   const composeRef = useRef<ComposeBoxRef>(null);
   const queryClient = useQueryClient();
 
@@ -145,7 +147,7 @@ export function HomePage() {
           if (e.key === "Enter") {
             const value = (e.target as HTMLInputElement).value.trim();
             if (value.length >= 2) {
-              window.location.href = `/search?q=${encodeURIComponent(value)}`;
+              navigate(`/search?q=${encodeURIComponent(value)}`);
             }
           }
         }}
@@ -154,7 +156,7 @@ export function HomePage() {
   );
 
   return (
-    <AppLayout rightSidebar={rightSidebar}>
+    <AppLayout rightSidebar={rightSidebar} showPostButton={false}>
       <style>{spinnerKeyframes}</style>
       <div style={styles.pageHeader}>
         <h2 style={styles.pageTitle}>Home</h2>
