@@ -1,0 +1,50 @@
+/* Screenshot stabilization CSS
+ * Applied during visual regression tests to ensure consistent screenshots
+ */
+
+/* Disable all animations and transitions */
+*,
+*::before,
+*::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
+/* Hide dynamic content that changes between runs */
+.timestamp,
+.post-timestamp,
+.notification-time,
+[data-testid="timestamp"] {
+  visibility: hidden !important;
+}
+
+/* Hide notification badges (counts change) */
+.notification-badge,
+.unread-count,
+.badge {
+  visibility: hidden !important;
+}
+
+/* Hide cursors and carets */
+textarea,
+input {
+  caret-color: transparent !important;
+}
+
+/* Stabilize scrollbars */
+::-webkit-scrollbar {
+  display: none !important;
+}
+
+* {
+  scrollbar-width: none !important;
+}
+
+/* Hide any live indicators */
+.live-indicator,
+.online-status,
+.typing-indicator {
+  display: none !important;
+}

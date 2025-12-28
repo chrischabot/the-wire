@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Wire</title>
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      (function () {
+        var theme = localStorage.getItem("the_wire_theme") || "maia";
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>
