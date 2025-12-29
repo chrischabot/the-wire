@@ -484,8 +484,9 @@ users.delete(
 /**
  * GET /api/users/:handle/followers - Get followers list
  */
-users.get("/:handle/followers", async (c) => {
+users.get("/:handle/followers", optionalAuth, async (c) => {
   const handle = normalizeHandle(c.req.param("handle"));
+  const currentUserId = c.get("userId");
 
   const userId = await c.env.USERS_KV.get(`handle:${handle}`);
   if (!userId) {
@@ -523,15 +524,39 @@ users.get("/:handle/followers", async (c) => {
     },
   );
 
-  const followers: UserProfile[] = [];
+  // Get current user's following list to determine isFollowing for each profile
+  let currentUserFollowing: Set<string> = new Set();
+  if (currentUserId) {
+    try {
+      const currentUserDoId = c.env.USER_DO.idFromName(currentUserId);
+      const currentUserStub = c.env.USER_DO.get(currentUserDoId);
+      const followingResp = await currentUserStub.fetch(
+        "https://do.internal/following",
+      );
+      const followingData = (await followingResp.json()) as {
+        following: string[];
+      };
+      currentUserFollowing = new Set(followingData.following || []);
+    } catch (err) {
+      console.error("Error fetching current user following:", err);
+    }
+  }
+
+  const followers: (UserProfile & { isFollowing?: boolean })[] = [];
   for (const followerId of data.followers) {
-    const handle = idToHandle.get(followerId);
-    if (!handle) continue;
-    const profile = profileMap.get(`profile:${handle}`);
+    const followerHandle = idToHandle.get(followerId);
+    if (!followerHandle) continue;
+    const profile = profileMap.get(`profile:${followerHandle}`);
     if (profile) {
-      profile.avatarUrl = profile.avatarUrl || PLACEHOLDERS.AVATAR;
-      profile.bannerUrl = profile.bannerUrl || PLACEHOLDERS.BANNER;
-      followers.push(profile);
+      const followerProfile: UserProfile & { isFollowing?: boolean } = {
+        ...profile,
+        avatarUrl: profile.avatarUrl || PLACEHOLDERS.AVATAR,
+        bannerUrl: profile.bannerUrl || PLACEHOLDERS.BANNER,
+      };
+      if (currentUserId) {
+        followerProfile.isFollowing = currentUserFollowing.has(followerId);
+      }
+      followers.push(followerProfile);
     }
   }
 
@@ -544,8 +569,9 @@ users.get("/:handle/followers", async (c) => {
 /**
  * GET /api/users/:handle/following - Get following list
  */
-users.get("/:handle/following", async (c) => {
+users.get("/:handle/following", optionalAuth, async (c) => {
   const handle = normalizeHandle(c.req.param("handle"));
+  const currentUserId = c.get("userId");
 
   const userId = await c.env.USERS_KV.get(`handle:${handle}`);
   if (!userId) {
@@ -583,15 +609,39 @@ users.get("/:handle/following", async (c) => {
     },
   );
 
-  const following: UserProfile[] = [];
+  // Get current user's following list to determine isFollowing for each profile
+  let currentUserFollowing: Set<string> = new Set();
+  if (currentUserId) {
+    try {
+      const currentUserDoId = c.env.USER_DO.idFromName(currentUserId);
+      const currentUserStub = c.env.USER_DO.get(currentUserDoId);
+      const currentFollowingResp = await currentUserStub.fetch(
+        "https://do.internal/following",
+      );
+      const currentFollowingData = (await currentFollowingResp.json()) as {
+        following: string[];
+      };
+      currentUserFollowing = new Set(currentFollowingData.following || []);
+    } catch (err) {
+      console.error("Error fetching current user following:", err);
+    }
+  }
+
+  const following: (UserProfile & { isFollowing?: boolean })[] = [];
   for (const followingId of data.following) {
-    const handle = idToHandle.get(followingId);
-    if (!handle) continue;
-    const profile = profileMap.get(`profile:${handle}`);
+    const followingHandle = idToHandle.get(followingId);
+    if (!followingHandle) continue;
+    const profile = profileMap.get(`profile:${followingHandle}`);
     if (profile) {
-      profile.avatarUrl = profile.avatarUrl || PLACEHOLDERS.AVATAR;
-      profile.bannerUrl = profile.bannerUrl || PLACEHOLDERS.BANNER;
-      following.push(profile);
+      const followingProfile: UserProfile & { isFollowing?: boolean } = {
+        ...profile,
+        avatarUrl: profile.avatarUrl || PLACEHOLDERS.AVATAR,
+        bannerUrl: profile.bannerUrl || PLACEHOLDERS.BANNER,
+      };
+      if (currentUserId) {
+        followingProfile.isFollowing = currentUserFollowing.has(followingId);
+      }
+      following.push(followingProfile);
     }
   }
 
@@ -805,6 +855,7 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
 /**
  * GET /api/users/:handle/replies - Get user's replies
  * Returns replies with parent post author info for "Replying to @handle" display
+ * OPTIMIZED: Uses user-posts index instead of scanning all posts
  */
 users.get("/:handle/replies", optionalAuth, async (c) => {
   const handle = normalizeHandle(c.req.param("handle"));
@@ -832,69 +883,116 @@ users.get("/:handle/replies", optionalAuth, async (c) => {
     }
   }
 
-  const posts: PostMetadata[] = [];
-  let postCursor: string | undefined;
+  const replies: PostMetadata[] = [];
 
-  while (posts.length < limit + offset) {
-    const listResult = await c.env.POSTS_KV.list({
-      prefix: "post:",
-      limit: BATCH_SIZE.KV_LIST,
-      cursor: postCursor ?? null,
-    });
+  // Fast path: use author posts index
+  const authorPostsKey = `user-posts:${userId}`;
+  const indexData = await c.env.POSTS_KV.get(authorPostsKey);
 
-    for (const key of listResult.keys) {
-      const postData = await c.env.POSTS_KV.get(key.name);
-      if (!postData) continue;
-      const post = safeJsonParse<PostMetadata>(postData);
-      if (!post) continue;
-      if (
-        post.authorId === userId &&
-        !post.isDeleted &&
-        !post.isTakenDown &&
-        post.replyToId
-      ) {
-        posts.push(post);
+  if (indexData) {
+    // Fast path: fetch posts from index and filter for replies
+    const postIds = safeJsonParse<string[]>(indexData);
+    if (postIds) {
+      // Batch fetch posts using the index
+      const postKeys = postIds.map((id) => `post:${id}`);
+      const postsMap = await batchKVGet<PostMetadata>(
+        c.env,
+        postKeys,
+        "POSTS_KV",
+        {
+          parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null),
+        },
+      );
+
+      // Filter for replies only
+      for (const postId of postIds) {
+        const post = postsMap.get(`post:${postId}`);
+        if (!post) continue;
+        if (post.isDeleted || post.isTakenDown) continue;
+        if (post.replyToId) {
+          replies.push(post);
+        }
       }
     }
+  } else {
+    // Fallback: scan posts (with limits to prevent timeout)
+    let postCursor: string | undefined;
+    let scannedBatches = 0;
+    const maxBatches = 20;
 
-    if (listResult.list_complete) break;
-    postCursor = listResult.cursor;
-  }
+    while (replies.length < limit + offset && scannedBatches < maxBatches) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: "post:",
+        limit: BATCH_SIZE.KV_LIST,
+        cursor: postCursor ?? null,
+      });
+      scannedBatches++;
 
-  posts.sort((a, b) => b.createdAt - a.createdAt);
+      // Batch fetch this chunk of posts
+      const keys = listResult.keys.map((k) => k.name);
+      const postsMap = await batchKVGet<PostMetadata>(c.env, keys, "POSTS_KV", {
+        parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null),
+      });
 
-  // Apply pagination
-  const paginatedPosts = posts.slice(offset, offset + limit);
-
-  // Fetch parent post info for each reply to get "Replying to @handle"
-  const enrichedPosts = await Promise.all(
-    paginatedPosts.map(async (post) => {
-      let replyToHandle: string | undefined;
-      let replyToDisplayName: string | undefined;
-
-      if (post.replyToId) {
-        const parentPostData = await c.env.POSTS_KV.get(
-          `post:${post.replyToId}`,
-        );
-        if (parentPostData) {
-          const parentPost = safeJsonParse<PostMetadata>(parentPostData);
-          if (parentPost) {
-            replyToHandle = parentPost.authorHandle;
-            replyToDisplayName = parentPost.authorDisplayName;
-          }
+      for (const key of listResult.keys) {
+        const post = postsMap.get(key.name);
+        if (!post) continue;
+        if (
+          post.authorId === userId &&
+          !post.isDeleted &&
+          !post.isTakenDown &&
+          post.replyToId
+        ) {
+          replies.push(post);
         }
       }
 
-      return {
-        ...post,
-        hasLiked: false,
-        replyToHandle,
-        replyToDisplayName,
-      };
-    }),
+      if (listResult.list_complete) break;
+      postCursor = listResult.cursor;
+    }
+  }
+
+  // Sort by creation time (newest first)
+  replies.sort((a, b) => b.createdAt - a.createdAt);
+
+  // Apply pagination
+  const paginatedReplies = replies.slice(offset, offset + limit);
+
+  // Batch fetch parent post info for "Replying to @handle" display
+  const parentIds = paginatedReplies
+    .map((p) => p.replyToId)
+    .filter((id): id is string => !!id);
+  const parentKeys = [...new Set(parentIds)].map((id) => `post:${id}`);
+  const parentsMap = await batchKVGet<PostMetadata>(
+    c.env,
+    parentKeys,
+    "POSTS_KV",
+    {
+      parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null),
+    },
   );
 
-  const hasMore = posts.length > offset + limit;
+  const enrichedPosts = paginatedReplies.map((post) => {
+    let replyToHandle: string | undefined;
+    let replyToDisplayName: string | undefined;
+
+    if (post.replyToId) {
+      const parentPost = parentsMap.get(`post:${post.replyToId}`);
+      if (parentPost) {
+        replyToHandle = parentPost.authorHandle;
+        replyToDisplayName = parentPost.authorDisplayName;
+      }
+    }
+
+    return {
+      ...post,
+      hasLiked: false,
+      replyToHandle,
+      replyToDisplayName,
+    };
+  });
+
+  const hasMore = replies.length > offset + limit;
   const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
 
   return c.json({

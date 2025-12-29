@@ -882,6 +882,44 @@ export class UserDO implements DurableObject {
         );
       }
 
+      // Clean nulls - remove null/undefined entries from following/followers arrays
+      if (path === "/clean-nulls" && method === "POST") {
+        const state = await this.ensureState();
+
+        const oldFollowingCount = state.following.length;
+        const oldFollowersCount = state.followers.length;
+
+        // Filter out nulls and undefined
+        state.following = state.following.filter(
+          (id): id is string => id !== null && id !== undefined && id !== "",
+        );
+        state.followers = state.followers.filter(
+          (id): id is string => id !== null && id !== undefined && id !== "",
+        );
+
+        // Rebuild the Sets
+        this.followingSet = new Set(state.following);
+        this.followersSet = new Set(state.followers);
+
+        // Update counts
+        state.profile.followingCount = state.following.length;
+        state.profile.followerCount = state.followers.length;
+
+        await this.saveState();
+
+        return new Response(
+          JSON.stringify({
+            removedFromFollowing: oldFollowingCount - state.following.length,
+            removedFromFollowers: oldFollowersCount - state.followers.length,
+            followingCount: state.profile.followingCount,
+            followerCount: state.profile.followerCount,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
       // Ban operations
       if (path === "/ban" && method === "POST") {
         const body = (await request.json()) as { reason: string };

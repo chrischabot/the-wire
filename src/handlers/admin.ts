@@ -542,4 +542,848 @@ admin.delete("/posts/:id", requireAuth, requireAdmin, async (c) => {
   }
 });
 
+/**
+ * POST /api/admin/repair/user/:handle/clean-nulls - Remove null entries from following/followers arrays
+ */
+admin.post(
+  "/repair/user/:handle/clean-nulls",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    const handle = c.req.param("handle").toLowerCase();
+
+    try {
+      const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+      if (!userId) {
+        return c.json({ success: false, error: "User not found" }, 404);
+      }
+
+      const doId = c.env.USER_DO.idFromName(userId);
+      const stub = c.env.USER_DO.get(doId);
+
+      // Get current following/followers
+      const [followingResp, followersResp] = await Promise.all([
+        stub.fetch("https://do.internal/following"),
+        stub.fetch("https://do.internal/followers"),
+      ]);
+
+      const { following } = (await followingResp.json()) as {
+        following: (string | null)[];
+      };
+      const { followers } = (await followersResp.json()) as {
+        followers: (string | null)[];
+      };
+
+      // Count nulls before cleaning
+      const nullsInFollowing = following.filter(
+        (id) => id === null || id === undefined,
+      ).length;
+      const nullsInFollowers = followers.filter(
+        (id) => id === null || id === undefined,
+      ).length;
+
+      // Call the DO's clean-nulls endpoint
+      const cleanResp = await stub.fetch("https://do.internal/clean-nulls", {
+        method: "POST",
+      });
+      const cleanResult = (await cleanResp.json()) as {
+        removedFromFollowing: number;
+        removedFromFollowers: number;
+        followingCount: number;
+        followerCount: number;
+      };
+
+      // Clear cache
+      await c.env.USERS_KV.delete(`profile:${handle}`);
+
+      return c.json({
+        success: true,
+        data: {
+          message: `Cleaned nulls for @${handle}`,
+          nullsFoundInFollowing: nullsInFollowing,
+          nullsFoundInFollowers: nullsInFollowers,
+          ...cleanResult,
+        },
+      });
+    } catch (error) {
+      console.error("Error cleaning nulls:", error);
+      return c.json({ success: false, error: "Error cleaning nulls" }, 500);
+    }
+  },
+);
+
+/**
+ * POST /api/admin/repair/rebuild-user-kv - Rebuild user:{id} KV entries for all users
+ * This fixes the issue where seeded users might not have user:{id} entries
+ */
+admin.post(
+  "/repair/rebuild-user-kv",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    try {
+      // Get all handle:{handle} entries
+      const handleKeys: string[] = [];
+      let handleCursor: string | undefined;
+      do {
+        const handleList = await c.env.USERS_KV.list({
+          prefix: "handle:",
+          limit: BATCH_SIZE.KV_LIST,
+          cursor: handleCursor ?? null,
+        });
+        handleKeys.push(...handleList.keys.map((k) => k.name));
+        handleCursor = handleList.list_complete ? undefined : handleList.cursor;
+      } while (handleCursor);
+
+      const results: Array<{
+        handle: string;
+        userId: string;
+        hadUserEntry: boolean;
+        created: boolean;
+      }> = [];
+
+      for (const handleKey of handleKeys) {
+        const handle = handleKey.replace("handle:", "");
+        const userId = await c.env.USERS_KV.get(handleKey);
+
+        if (!userId) continue;
+
+        // Check if user:{id} entry exists
+        const userEntry = await c.env.USERS_KV.get(`user:${userId}`);
+
+        if (!userEntry) {
+          // Create user:{id} entry with minimal data
+          // We need to get the handle and email from other sources
+          const profileData = await c.env.USERS_KV.get(`profile:${handle}`);
+          if (profileData) {
+            const profile = safeJsonParse<UserProfile>(profileData);
+            if (profile) {
+              const authUser = {
+                id: userId,
+                email: `${handle}@seeded.example`, // Placeholder email for seeded users
+                handle: handle,
+                passwordHash: "", // No password for seeded users
+                salt: "",
+                createdAt: profile.joinedAt || Date.now(),
+              };
+              await c.env.USERS_KV.put(
+                `user:${userId}`,
+                JSON.stringify(authUser),
+              );
+              results.push({
+                handle,
+                userId,
+                hadUserEntry: false,
+                created: true,
+              });
+            }
+          }
+        } else {
+          results.push({ handle, userId, hadUserEntry: true, created: false });
+        }
+      }
+
+      const createdCount = results.filter((r) => r.created).length;
+
+      return c.json({
+        success: true,
+        data: {
+          message: `Rebuilt user KV entries`,
+          totalUsers: results.length,
+          createdEntries: createdCount,
+          results,
+        },
+      });
+    } catch (error) {
+      console.error("Error rebuilding user KV:", error);
+      return c.json(
+        { success: false, error: "Error rebuilding user KV" },
+        500,
+      );
+    }
+  },
+);
+
+/**
+ * POST /api/admin/repair/rebuild-profile-cache - Rebuild profile:{handle} KV entries from DOs
+ */
+admin.post(
+  "/repair/rebuild-profile-cache",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    try {
+      // Get all handle:{handle} entries
+      const handleKeys: string[] = [];
+      let handleCursor: string | undefined;
+      do {
+        const handleList = await c.env.USERS_KV.list({
+          prefix: "handle:",
+          limit: BATCH_SIZE.KV_LIST,
+          cursor: handleCursor ?? null,
+        });
+        handleKeys.push(...handleList.keys.map((k) => k.name));
+        handleCursor = handleList.list_complete ? undefined : handleList.cursor;
+      } while (handleCursor);
+
+      const results: Array<{
+        handle: string;
+        hadCachedProfile: boolean;
+        cached: boolean;
+      }> = [];
+
+      for (const handleKey of handleKeys) {
+        const handle = handleKey.replace("handle:", "");
+        const userId = await c.env.USERS_KV.get(handleKey);
+
+        if (!userId) continue;
+
+        // Check if profile cache exists
+        const existingProfile = await c.env.USERS_KV.get(`profile:${handle}`);
+        const hadCachedProfile = !!existingProfile;
+
+        // Fetch fresh profile from DO and cache it
+        try {
+          const doId = c.env.USER_DO.idFromName(userId);
+          const stub = c.env.USER_DO.get(doId);
+          const response = await stub.fetch("https://do.internal/profile");
+          const profile = await response.json();
+
+          // Cache the profile
+          await c.env.USERS_KV.put(
+            `profile:${handle}`,
+            JSON.stringify(profile),
+            { expirationTtl: 3600 }, // 1 hour TTL
+          );
+
+          results.push({ handle, hadCachedProfile, cached: true });
+        } catch (err) {
+          console.error(`Error caching profile for ${handle}:`, err);
+          results.push({ handle, hadCachedProfile, cached: false });
+        }
+      }
+
+      const cachedCount = results.filter((r) => r.cached).length;
+      const alreadyCachedCount = results.filter((r) => r.hadCachedProfile)
+        .length;
+
+      return c.json({
+        success: true,
+        data: {
+          message: "Rebuilt profile cache",
+          totalUsers: results.length,
+          alreadyCached: alreadyCachedCount,
+          newlyCached: cachedCount - alreadyCachedCount,
+          results,
+        },
+      });
+    } catch (error) {
+      console.error("Error rebuilding profile cache:", error);
+      return c.json(
+        { success: false, error: "Error rebuilding profile cache" },
+        500,
+      );
+    }
+  },
+);
+
+/**
+ * GET /api/admin/debug/following/:handle - Debug following resolution
+ */
+admin.get(
+  "/debug/following/:handle",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    const handle = c.req.param("handle").toLowerCase();
+
+    try {
+      const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+      if (!userId) {
+        return c.json({ success: false, error: "User not found" }, 404);
+      }
+
+      const doId = c.env.USER_DO.idFromName(userId);
+      const stub = c.env.USER_DO.get(doId);
+
+      const followingResp = await stub.fetch("https://do.internal/following");
+      const { following } = (await followingResp.json()) as {
+        following: string[];
+      };
+
+      // Step 1: Get user entries
+      const userKeys = following.map((id) => `user:${id}`);
+      const userMap = await batchKVGet(c.env, userKeys, "USERS_KV", {
+        parse: (val) =>
+          val
+            ? safeJsonParse<{ id: string; handle: string; email: string }>(val)
+            : null,
+      });
+
+      // Step 2: Extract handles
+      const handlesToFetch: string[] = [];
+      const idToHandle = new Map<string, string>();
+      const userLookupResults: Array<{
+        userId: string;
+        foundUser: boolean;
+        handle: string | null;
+      }> = [];
+
+      for (const followingId of following) {
+        const authUser = userMap.get(`user:${followingId}`);
+        userLookupResults.push({
+          userId: followingId,
+          foundUser: !!authUser,
+          handle: authUser?.handle || null,
+        });
+        if (authUser?.handle) {
+          handlesToFetch.push(authUser.handle);
+          idToHandle.set(followingId, authUser.handle);
+        }
+      }
+
+      // Step 3: Get profiles
+      const profileKeys = handlesToFetch.map((h) => `profile:${h}`);
+      const profileMap = await batchKVGet<UserProfile>(
+        c.env,
+        profileKeys,
+        "USERS_KV",
+        {
+          parse: (val) => (val ? safeJsonParse<UserProfile>(val) : null),
+        },
+      );
+
+      const profileLookupResults: Array<{
+        handle: string;
+        foundProfile: boolean;
+      }> = [];
+      for (const h of handlesToFetch) {
+        profileLookupResults.push({
+          handle: h,
+          foundProfile: !!profileMap.get(`profile:${h}`),
+        });
+      }
+
+      return c.json({
+        success: true,
+        data: {
+          followingCount: following.length,
+          userLookupResults,
+          handlesFound: handlesToFetch.length,
+          profileLookupResults,
+          profilesFound: profileLookupResults.filter((r) => r.foundProfile)
+            .length,
+        },
+      });
+    } catch (error) {
+      console.error("Error debugging following:", error);
+      return c.json(
+        { success: false, error: "Error debugging following" },
+        500,
+      );
+    }
+  },
+);
+
+/**
+ * GET /api/admin/debug/user/:handle - Debug user's DO state
+ */
+admin.get("/debug/user/:handle", requireAuth, requireAdmin, async (c) => {
+  const handle = c.req.param("handle").toLowerCase();
+
+  try {
+    const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+    if (!userId) {
+      return c.json({ success: false, error: "User not found" }, 404);
+    }
+
+    const doId = c.env.USER_DO.idFromName(userId);
+    const stub = c.env.USER_DO.get(doId);
+
+    const [profileResp, followingResp, followersResp, settingsResp] =
+      await Promise.all([
+        stub.fetch("https://do.internal/profile"),
+        stub.fetch("https://do.internal/following"),
+        stub.fetch("https://do.internal/followers"),
+        stub.fetch("https://do.internal/settings"),
+      ]);
+
+    const profile = await profileResp.json();
+    const { following } = (await followingResp.json()) as {
+      following: string[];
+    };
+    const { followers } = (await followersResp.json()) as {
+      followers: string[];
+    };
+    const settings = await settingsResp.json();
+
+    // Get KV data
+    const kvProfile = await c.env.USERS_KV.get(`profile:${handle}`);
+    const kvUser = await c.env.USERS_KV.get(`user:${userId}`);
+
+    return c.json({
+      success: true,
+      data: {
+        userId,
+        handle,
+        doState: {
+          profile,
+          followingCount: following?.length || 0,
+          followerCount: followers?.length || 0,
+          following: following || [],
+          followers: followers || [],
+          settings,
+        },
+        kvState: {
+          profile: kvProfile ? JSON.parse(kvProfile) : null,
+          user: kvUser ? JSON.parse(kvUser) : null,
+        },
+        discrepancies: {
+          followingMismatch:
+            (profile as { followingCount?: number }).followingCount !==
+            (following?.length || 0),
+          followersMismatch:
+            (profile as { followerCount?: number }).followerCount !==
+            (followers?.length || 0),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error debugging user:", error);
+    return c.json({ success: false, error: "Error debugging user" }, 500);
+  }
+});
+
+/**
+ * POST /api/admin/repair/user/:handle/rebuild-social - Rebuild social graph from all users
+ * Scans all users to find who follows this user and who this user follows
+ */
+admin.post(
+  "/repair/user/:handle/rebuild-social",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    const handle = c.req.param("handle").toLowerCase();
+
+    try {
+      const targetUserId = await c.env.USERS_KV.get(`handle:${handle}`);
+      if (!targetUserId) {
+        return c.json({ success: false, error: "User not found" }, 404);
+      }
+
+      // Get all user IDs
+      const userKeys: string[] = [];
+      let userCursor: string | undefined;
+      do {
+        const userList = await c.env.USERS_KV.list({
+          prefix: "user:",
+          limit: BATCH_SIZE.KV_LIST,
+          cursor: userCursor ?? null,
+        });
+        userKeys.push(...userList.keys.map((k) => k.name.replace("user:", "")));
+        userCursor = userList.list_complete ? undefined : userList.cursor;
+      } while (userCursor);
+
+      // For each user, check if they follow target or if target follows them
+      const foundFollowers: string[] = [];
+      const foundFollowing: string[] = [];
+
+      for (const userId of userKeys) {
+        if (userId === targetUserId) continue;
+
+        try {
+          const doId = c.env.USER_DO.idFromName(userId);
+          const stub = c.env.USER_DO.get(doId);
+
+          // Check if this user follows target
+          const followingResp = await stub.fetch(
+            `https://do.internal/is-following?userId=${targetUserId}`,
+          );
+          const { isFollowing } = (await followingResp.json()) as {
+            isFollowing: boolean;
+          };
+          if (isFollowing) {
+            foundFollowers.push(userId);
+          }
+
+          // Check if target follows this user (by checking this user's followers)
+          const followersResp = await stub.fetch(
+            "https://do.internal/followers",
+          );
+          const { followers } = (await followersResp.json()) as {
+            followers: string[];
+          };
+          if (followers?.includes(targetUserId)) {
+            foundFollowing.push(userId);
+          }
+        } catch (err) {
+          console.error(`Error checking user ${userId}:`, err);
+        }
+      }
+
+      // Now update target user's DO with the found relationships
+      const targetDoId = c.env.USER_DO.idFromName(targetUserId);
+      const targetStub = c.env.USER_DO.get(targetDoId);
+
+      // Get current state
+      const currentFollowingResp = await targetStub.fetch(
+        "https://do.internal/following",
+      );
+      const currentFollowersResp = await targetStub.fetch(
+        "https://do.internal/followers",
+      );
+      const { following: currentFollowing } =
+        (await currentFollowingResp.json()) as { following: string[] };
+      const { followers: currentFollowers } =
+        (await currentFollowersResp.json()) as { followers: string[] };
+
+      // Add missing followers
+      for (const followerId of foundFollowers) {
+        if (!currentFollowers?.includes(followerId)) {
+          await targetStub.fetch("https://do.internal/add-follower", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: followerId }),
+          });
+        }
+      }
+
+      // Add missing following
+      for (const followingId of foundFollowing) {
+        if (!currentFollowing?.includes(followingId)) {
+          await targetStub.fetch("https://do.internal/follow", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: followingId }),
+          });
+        }
+      }
+
+      // Sync counts
+      await targetStub.fetch("https://do.internal/sync-counts", {
+        method: "POST",
+      });
+
+      // Clear profile cache
+      await c.env.USERS_KV.delete(`profile:${handle}`);
+
+      return c.json({
+        success: true,
+        data: {
+          message: `Rebuilt social graph for @${handle}`,
+          foundFollowers: foundFollowers.length,
+          foundFollowing: foundFollowing.length,
+          previousFollowers: currentFollowers?.length || 0,
+          previousFollowing: currentFollowing?.length || 0,
+        },
+      });
+    } catch (error) {
+      console.error("Error rebuilding social graph:", error);
+      return c.json(
+        { success: false, error: "Error rebuilding social graph" },
+        500,
+      );
+    }
+  },
+);
+
+/**
+ * POST /api/admin/repair/user/:handle/sync-counts - Sync follower/following counts with arrays
+ */
+admin.post(
+  "/repair/user/:handle/sync-counts",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    const handle = c.req.param("handle").toLowerCase();
+
+    try {
+      const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+      if (!userId) {
+        return c.json({ success: false, error: "User not found" }, 404);
+      }
+
+      const doId = c.env.USER_DO.idFromName(userId);
+      const stub = c.env.USER_DO.get(doId);
+
+      const response = await stub.fetch("https://do.internal/sync-counts", {
+        method: "POST",
+      });
+      const data = (await response.json()) as {
+        followingCount: number;
+        followerCount: number;
+      };
+
+      // Clear profile cache
+      await c.env.USERS_KV.delete(`profile:${handle}`);
+
+      return c.json({
+        success: true,
+        data: {
+          message: `Synced counts for @${handle}`,
+          followingCount: data.followingCount,
+          followerCount: data.followerCount,
+        },
+      });
+    } catch (error) {
+      console.error("Error syncing counts:", error);
+      return c.json({ success: false, error: "Error syncing counts" }, 500);
+    }
+  },
+);
+
+/**
+ * GET /api/admin/debug/all-users-social - Get social graph for all users
+ */
+admin.get(
+  "/debug/all-users-social",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    try {
+      // Get all user IDs
+      const userKeys: string[] = [];
+      let userCursor: string | undefined;
+      do {
+        const userList = await c.env.USERS_KV.list({
+          prefix: "user:",
+          limit: BATCH_SIZE.KV_LIST,
+          cursor: userCursor ?? null,
+        });
+        userKeys.push(...userList.keys.map((k) => k.name));
+        userCursor = userList.list_complete ? undefined : userList.cursor;
+      } while (userCursor);
+
+      const userDataMap = await batchKVGet(c.env, userKeys, "USERS_KV");
+
+      const usersWithSocial: Array<{
+        userId: string;
+        handle: string;
+        followingCount: number;
+        followerCount: number;
+        actualFollowing: number;
+        actualFollowers: number;
+        following: string[];
+        followers: string[];
+      }> = [];
+
+      for (const [key, data] of userDataMap) {
+        const userId = key.replace("user:", "");
+        const user = safeJsonParse<{ handle: string }>(data);
+        if (!user?.handle) continue;
+
+        try {
+          const doId = c.env.USER_DO.idFromName(userId);
+          const stub = c.env.USER_DO.get(doId);
+
+          const [profileResp, followingResp, followersResp] = await Promise.all(
+            [
+              stub.fetch("https://do.internal/profile"),
+              stub.fetch("https://do.internal/following"),
+              stub.fetch("https://do.internal/followers"),
+            ],
+          );
+
+          const profile = (await profileResp.json()) as {
+            followingCount?: number;
+            followerCount?: number;
+          };
+          const { following } = (await followingResp.json()) as {
+            following: string[];
+          };
+          const { followers } = (await followersResp.json()) as {
+            followers: string[];
+          };
+
+          usersWithSocial.push({
+            userId,
+            handle: user.handle,
+            followingCount: profile.followingCount || 0,
+            followerCount: profile.followerCount || 0,
+            actualFollowing: following?.length || 0,
+            actualFollowers: followers?.length || 0,
+            following: following || [],
+            followers: followers || [],
+          });
+        } catch (err) {
+          console.error(`Error fetching social for ${user.handle}:`, err);
+        }
+      }
+
+      return c.json({
+        success: true,
+        data: {
+          users: usersWithSocial,
+          totalUsers: usersWithSocial.length,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching all users social:", error);
+      return c.json(
+        { success: false, error: "Error fetching all users social" },
+        500,
+      );
+    }
+  },
+);
+
+/**
+ * POST /api/admin/repair/rebuild-all-social - Rebuild social graph for all users
+ */
+admin.post(
+  "/repair/rebuild-all-social",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    try {
+      // Get all user IDs and handles
+      const userKeys: string[] = [];
+      let userCursor: string | undefined;
+      do {
+        const userList = await c.env.USERS_KV.list({
+          prefix: "user:",
+          limit: BATCH_SIZE.KV_LIST,
+          cursor: userCursor ?? null,
+        });
+        userKeys.push(...userList.keys.map((k) => k.name));
+        userCursor = userList.list_complete ? undefined : userList.cursor;
+      } while (userCursor);
+
+      const userDataMap = await batchKVGet(c.env, userKeys, "USERS_KV");
+
+      const userIdToHandle = new Map<string, string>();
+      for (const [key, data] of userDataMap) {
+        const userId = key.replace("user:", "");
+        const user = safeJsonParse<{ handle: string }>(data);
+        if (user?.handle) {
+          userIdToHandle.set(userId, user.handle);
+        }
+      }
+
+      const userIds = [...userIdToHandle.keys()];
+
+      // Build a complete map of who follows whom by scanning all DOs
+      const followingMap = new Map<string, Set<string>>(); // userId -> Set of userIds they follow
+      const followersMap = new Map<string, Set<string>>(); // userId -> Set of userIds who follow them
+
+      for (const userId of userIds) {
+        followingMap.set(userId, new Set());
+        followersMap.set(userId, new Set());
+      }
+
+      // Scan each user's following list
+      for (const userId of userIds) {
+        try {
+          const doId = c.env.USER_DO.idFromName(userId);
+          const stub = c.env.USER_DO.get(doId);
+
+          const followingResp = await stub.fetch(
+            "https://do.internal/following",
+          );
+          const { following } = (await followingResp.json()) as {
+            following: string[];
+          };
+
+          if (following) {
+            for (const followedId of following) {
+              // Record that userId follows followedId
+              followingMap.get(userId)!.add(followedId);
+              // Record that followedId has userId as a follower
+              if (followersMap.has(followedId)) {
+                followersMap.get(followedId)!.add(userId);
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`Error scanning ${userId}:`, err);
+        }
+      }
+
+      // Now update each user's DO with the correct data
+      const results: Array<{
+        handle: string;
+        oldFollowing: number;
+        newFollowing: number;
+        oldFollowers: number;
+        newFollowers: number;
+      }> = [];
+
+      for (const userId of userIds) {
+        try {
+          const handle = userIdToHandle.get(userId)!;
+          const doId = c.env.USER_DO.idFromName(userId);
+          const stub = c.env.USER_DO.get(doId);
+
+          // Get current state
+          const [followingResp, followersResp] = await Promise.all([
+            stub.fetch("https://do.internal/following"),
+            stub.fetch("https://do.internal/followers"),
+          ]);
+          const { following: currentFollowing } =
+            (await followingResp.json()) as { following: string[] };
+          const { followers: currentFollowers } =
+            (await followersResp.json()) as { followers: string[] };
+
+          const correctFollowing = followingMap.get(userId)!;
+          const correctFollowers = followersMap.get(userId)!;
+
+          // Add missing following
+          for (const followingId of correctFollowing) {
+            if (!currentFollowing?.includes(followingId)) {
+              await stub.fetch("https://do.internal/follow", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: followingId }),
+              });
+            }
+          }
+
+          // Add missing followers
+          for (const followerId of correctFollowers) {
+            if (!currentFollowers?.includes(followerId)) {
+              await stub.fetch("https://do.internal/add-follower", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: followerId }),
+              });
+            }
+          }
+
+          // Sync counts
+          await stub.fetch("https://do.internal/sync-counts", {
+            method: "POST",
+          });
+
+          // Clear cache
+          await c.env.USERS_KV.delete(`profile:${handle}`);
+
+          results.push({
+            handle,
+            oldFollowing: currentFollowing?.length || 0,
+            newFollowing: correctFollowing.size,
+            oldFollowers: currentFollowers?.length || 0,
+            newFollowers: correctFollowers.size,
+          });
+        } catch (err) {
+          console.error(`Error updating ${userId}:`, err);
+        }
+      }
+
+      return c.json({
+        success: true,
+        data: {
+          message: "Rebuilt social graph for all users",
+          results,
+        },
+      });
+    } catch (error) {
+      console.error("Error rebuilding all social:", error);
+      return c.json(
+        { success: false, error: "Error rebuilding all social" },
+        500,
+      );
+    }
+  },
+);
+
 export default admin;
