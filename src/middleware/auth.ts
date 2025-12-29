@@ -32,6 +32,7 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(
     let authMethod: "clerk" | "legacy" = "legacy";
 
     const clerkAuth = getAuth(c);
+
     if (clerkAuth?.userId) {
       const internalUserId = await c.env.USERS_KV.get(
         `clerk:${clerkAuth.userId}`,
@@ -44,11 +45,21 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(
           userEmail = authUser.email;
           userHandle = authUser.handle;
           authMethod = "clerk";
+        } else {
+          console.error("User data not found for internal ID:", internalUserId);
+          return c.json({ success: false, error: "User data not found" }, 500);
         }
+      } else {
+        return c.json(
+          {
+            success: false,
+            error: "Account setup incomplete. Please complete onboarding.",
+            code: "NEEDS_HANDLE",
+          },
+          403,
+        );
       }
-    }
-
-    if (!userId) {
+    } else {
       const authHeader = c.req.header("Authorization");
       const token = extractToken(authHeader ?? null);
 
@@ -82,9 +93,13 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(
       authMethod = "legacy";
     }
 
+    if (!userId || !userEmail || !userHandle) {
+      return c.json({ success: false, error: "Authentication failed" }, 401);
+    }
+
     c.set("userId", userId);
-    c.set("userEmail", userEmail!);
-    c.set("userHandle", userHandle!);
+    c.set("userEmail", userEmail);
+    c.set("userHandle", userHandle);
     c.set("authMethod", authMethod);
 
     const banCacheKey = `ban-status:${userId}`;

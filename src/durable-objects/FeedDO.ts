@@ -76,42 +76,38 @@ export class FeedDO implements DurableObject {
       );
     }
 
-    // Filter posts with muted words
+    // Filter posts with muted words (batched for performance)
     if (mutedWords.length > 0) {
       const normalizedMuted = this.normalizeMutedWords(mutedWords);
       const mutedMatcher = this.buildMutedWordMatcher(normalizedMuted);
       if (!mutedMatcher) return filtered;
 
-      const entriesWithContent = await Promise.all(
-        filtered.map(async (entry) => {
-          try {
-            // Fetch post metadata from KV to get content
-            const postData = await this.env.POSTS_KV.get(
-              `post:${entry.postId}`,
-            );
-            if (!postData) return { entry, include: false };
-
-            const post: PostMetadata = JSON.parse(postData);
-            const content = post.content || post.originalPost?.content || "";
-
-            // Check if content contains any muted word
-            const hasMutedWord = mutedMatcher(content);
-
-            return { entry, include: !hasMutedWord };
-          } catch (error) {
-            // If we can't fetch the post, exclude it for safety
-            console.error(
-              `Error fetching post ${entry.postId} for muted word filtering:`,
-              error,
-            );
-            return { entry, include: false };
-          }
-        }),
+      // Batch fetch all post content at once instead of N+1 individual reads
+      const kvKeys = filtered.map((e) => `post:${e.postId}`);
+      const postMap = await batchKVGet<PostMetadata>(
+        this.env,
+        kvKeys,
+        "POSTS_KV",
+        {
+          parse: (val) => {
+            if (!val) return null;
+            try {
+              return JSON.parse(val) as PostMetadata;
+            } catch {
+              return null;
+            }
+          },
+        },
       );
 
-      filtered = entriesWithContent
-        .filter((item) => item.include)
-        .map((item) => item.entry);
+      // Now filter synchronously using the batched results
+      filtered = filtered.filter((entry) => {
+        const post = postMap.get(`post:${entry.postId}`);
+        if (!post) return false;
+
+        const content = post.content || post.originalPost?.content || "";
+        return !mutedMatcher(content);
+      });
     }
 
     return filtered;

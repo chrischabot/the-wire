@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   MessageSquare,
@@ -236,7 +236,22 @@ interface PostCardProps {
   onDelete?: (postId: string) => void;
 }
 
-export function PostCard({
+function arePropsEqual(prev: PostCardProps, next: PostCardProps): boolean {
+  const p = prev.post;
+  const n = next.post;
+  return (
+    p.id === n.id &&
+    p.likeCount === n.likeCount &&
+    p.replyCount === n.replyCount &&
+    p.repostCount === n.repostCount &&
+    p.hasLiked === n.hasLiked &&
+    p.hasReposted === n.hasReposted &&
+    prev.showActions === next.showActions &&
+    prev.showMenu === next.showMenu
+  );
+}
+
+export const PostCard = memo(function PostCard({
   post,
   showActions = true,
   showMenu = true,
@@ -668,4 +683,4 @@ export function PostCard({
       />
     </>
   );
-}
+}, arePropsEqual);

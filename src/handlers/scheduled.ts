@@ -240,11 +240,15 @@ async function updateExploreRankings(env: Env): Promise<void> {
     }
   }
 
-  // Store in KV - full post data for instant loading (no additional fetches needed)
-  const cacheData = diversePosts.map((p) => p.post);
-  await env.FEEDS_KV.put("explore:ranked", JSON.stringify(cacheData), {
-    expirationTtl: CACHE_TTL.FOF_RANKINGS, // 15 minutes
-  });
+  const cacheData = JSON.stringify(diversePosts.map((p) => p.post));
+  await Promise.all([
+    env.FEEDS_KV.put("explore:ranked", cacheData, {
+      expirationTtl: CACHE_TTL.FOF_RANKINGS,
+    }),
+    env.FEEDS_KV.put("explore:ranked:previous", cacheData, {
+      expirationTtl: CACHE_TTL.FOF_RANKINGS * 4,
+    }),
+  ]);
 }
 
 /**

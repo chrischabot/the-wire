@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { AppLayout } from "../components/layout";
@@ -85,26 +85,28 @@ export function ExplorePage() {
     },
     getNextPageParam: (lastPage) => lastPage?.nextCursor,
     initialPageParam: undefined as string | undefined,
+    maxPages: 10,
+    staleTime: 1000 * 60 * 3,
   });
 
   const posts = data?.pages.flatMap((page) => page?.items ?? []) ?? [];
-
-  const handleScroll = useCallback(() => {
-    if (isFetchingNextPage || !hasNextPage) return;
-
-    const scrollTop = window.scrollY;
-    const windowHeight = window.innerHeight;
-    const docHeight = document.documentElement.scrollHeight;
-
-    if (scrollTop + windowHeight >= docHeight - 300) {
-      fetchNextPage();
-    }
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, [handleScroll]);
+    if (!loadMoreRef.current || !hasNextPage || isFetchingNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          fetchNextPage();
+        }
+      },
+      { threshold: 0.1, rootMargin: "300px" },
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   const rightSidebar = (
     <div style={styles.searchBox}>
@@ -154,6 +156,8 @@ export function ExplorePage() {
         {posts.map((post) => (
           <PostCard key={post.id} post={post} />
         ))}
+
+        <div ref={loadMoreRef} style={{ height: 20 }} />
 
         {isFetchingNextPage && (
           <div style={styles.loadingMore}>

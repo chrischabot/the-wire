@@ -13,8 +13,6 @@ import {
   SettingsPage,
   MutedWordsPage,
   AdminPage,
-  LoginPage,
-  SignupPage,
   SearchPage,
   FollowListPage,
   AuthPage,
@@ -67,8 +65,8 @@ export function App() {
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/post-auth" element={<PostAuthPage />} />
         <Route path="/onboarding/handle" element={<HandleOnboardingPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
+        <Route path="/login" element={<Navigate to="/auth" replace />} />
+        <Route path="/signup" element={<Navigate to="/auth" replace />} />
         <Route
           path="/home"
           element={

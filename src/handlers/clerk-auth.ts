@@ -52,6 +52,54 @@ clerkAuth.get("/session", requireClerkAuth, async (c) => {
       }
     }
 
+    if (email) {
+      const normalizedEmail = normalizeEmail(email);
+      const existingUserId = await c.env.USERS_KV.get(
+        `email:${normalizedEmail}`,
+      );
+
+      if (existingUserId) {
+        log.info("Auto-linking Clerk user to existing account by email", {
+          clerkUserId,
+          email: normalizedEmail,
+          existingUserId,
+        });
+
+        await c.env.USERS_KV.put(`clerk:${clerkUserId}`, existingUserId);
+
+        const existingUserData = await c.env.USERS_KV.get(
+          `user:${existingUserId}`,
+        );
+        if (existingUserData) {
+          const existingUser: AuthUser = JSON.parse(existingUserData);
+          existingUser.clerkId = clerkUserId;
+          existingUser.authProvider = "clerk";
+          existingUser.lastLogin = Date.now();
+          await c.env.USERS_KV.put(
+            `user:${existingUserId}`,
+            JSON.stringify(existingUser),
+          );
+
+          const doId = c.env.USER_DO.idFromName(existingUserId);
+          const stub = c.env.USER_DO.get(doId);
+          const profileResp = await stub.fetch("https://do.internal/profile");
+          const profile = (await profileResp.json()) as UserProfile;
+
+          return success({
+            status: "linked",
+            user: {
+              id: existingUser.id,
+              email: existingUser.email,
+              handle: existingUser.handle,
+              displayName: profile.displayName || existingUser.handle,
+              avatarUrl: profile.avatarUrl || undefined,
+              isAdmin: profile.isAdmin || undefined,
+            },
+          });
+        }
+      }
+    }
+
     return success({
       status: "needs_handle",
       clerkUserId,

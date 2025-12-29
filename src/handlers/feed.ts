@@ -20,6 +20,38 @@ import { batchKVGet } from "../utils/batch";
 
 const feed = new Hono<{ Bindings: Env }>();
 
+const FEED_CACHE_TTL_SECONDS = 15;
+
+async function getCachedResponse(cacheKey: string): Promise<Response | null> {
+  try {
+    const cache = caches.default;
+    const request = new Request(`https://cache.internal/${cacheKey}`);
+    const cached = await cache.match(request);
+    return cached || null;
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedResponse(
+  cacheKey: string,
+  response: Response,
+  ctx: ExecutionContext,
+): Promise<void> {
+  try {
+    const cache = caches.default;
+    const request = new Request(`https://cache.internal/${cacheKey}`);
+    const clonedResponse = new Response(response.body, {
+      status: response.status,
+      headers: {
+        ...Object.fromEntries(response.headers),
+        "Cache-Control": `public, max-age=${FEED_CACHE_TTL_SECONDS}`,
+      },
+    });
+    ctx.waitUntil(cache.put(request, clonedResponse));
+  } catch {}
+}
+
 interface FeedPost extends PostMetadata {
   source: "own" | "follow" | "fof";
   hasLiked?: boolean;
@@ -51,6 +83,10 @@ feed.get("/home", requireAuth, async (c) => {
     parseInt(c.req.query("limit") || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10),
     LIMITS.MAX_PAGINATION_LIMIT,
   );
+
+  const cacheKey = `feed/home/${userId}/${cursor || "start"}/${limit}`;
+  const cached = await getCachedResponse(cacheKey);
+  if (cached) return cached;
 
   const getExploreFallback = async () => {
     const data = await c.env.FEEDS_KV.get("explore:ranked");
@@ -202,9 +238,14 @@ feed.get("/home", requireAuth, async (c) => {
       }
 
       // Batch fetch all posts at once
-      const postMap = await batchKVGet<PostMetadata>(c.env, allKeys, "POSTS_KV", {
-        parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null),
-      });
+      const postMap = await batchKVGet<PostMetadata>(
+        c.env,
+        allKeys,
+        "POSTS_KV",
+        {
+          parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null),
+        },
+      );
 
       const onDemandPosts: PostMetadata[] = [];
       for (const [, post] of postMap) {
@@ -286,18 +327,23 @@ feed.get("/home", requireAuth, async (c) => {
 
       if (maxBackfill > 0) {
         const backfillAuthors = authorsToProcess.slice(0, maxBackfill);
-        const backfillIndexes = await Promise.all(
-          backfillAuthors.map((authorId) =>
-            c.env.POSTS_KV.get(`user-posts:${authorId}`),
-          ),
+
+        // Batch fetch all user-posts indexes at once
+        const indexKeys = backfillAuthors.map((id) => `user-posts:${id}`);
+        const indexMap = await batchKVGet<string[]>(
+          c.env,
+          indexKeys,
+          "POSTS_KV",
+          {
+            parse: (v) => (v ? safeJsonParse<string[]>(v) : null),
+          },
         );
 
+        // Collect all post IDs to fetch, with deduplication
         const backfillPostIds: Array<{ authorId: string; postId: string }> = [];
-        for (let i = 0; i < backfillAuthors.length; i++) {
-          const authorId = backfillAuthors[i]!;
-          const indexData = backfillIndexes[i];
-          if (!indexData) continue;
-          const postIds = safeJsonParse<string[]>(indexData) || [];
+        for (const authorId of backfillAuthors) {
+          const postIds = indexMap.get(`user-posts:${authorId}`);
+          if (!postIds) continue;
           let addedForAuthor = 0;
           for (const postId of postIds) {
             if (addedForAuthor >= postsPerAuthor) break;
@@ -308,16 +354,19 @@ feed.get("/home", requireAuth, async (c) => {
           }
         }
 
-        const backfillPostsData = await Promise.all(
-          backfillPostIds.map((item) =>
-            c.env.POSTS_KV.get(`post:${item.postId}`),
-          ),
+        // Batch fetch all posts at once
+        const postKeys = backfillPostIds.map((item) => `post:${item.postId}`);
+        const postMap = await batchKVGet<PostMetadata>(
+          c.env,
+          postKeys,
+          "POSTS_KV",
+          {
+            parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null),
+          },
         );
 
-        for (let i = 0; i < backfillPostIds.length; i++) {
-          const data = backfillPostsData[i];
-          if (!data) continue;
-          const post = safeJsonParse<PostMetadata>(data);
+        for (const item of backfillPostIds) {
+          const post = postMap.get(`post:${item.postId}`);
           if (!post) continue;
           if (post.isDeleted || post.isTakenDown) continue;
           if (blockedSet.has(post.authorId)) continue;
@@ -376,22 +425,26 @@ feed.get("/home", requireAuth, async (c) => {
       ? SCORING.FOLLOW_RATIO_STALE
       : SCORING.FOLLOW_RATIO_NORMAL;
 
+    const availableSlots = limit - pinnedPosts.length;
+    const followQuota = Math.ceil(availableSlots * followRatio);
+    const exploreQuota = availableSlots - followQuota;
+
+    const topKMultiplier = 5;
     const scoredFollow = remainingFollowPosts
       .map((post) => ({
         post,
         score: scoreFeedPost(post, authorFrequency, now),
       }))
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score)
+      .slice(0, followQuota * topKMultiplier);
+
     const scoredExplore = explorePosts
       .map((post) => ({
         post,
         score: scoreFeedPost(post, authorFrequency, now),
       }))
-      .sort((a, b) => b.score - a.score);
-
-    const availableSlots = limit - pinnedPosts.length;
-    const followQuota = Math.ceil(availableSlots * followRatio);
-    const exploreQuota = availableSlots - followQuota;
+      .sort((a, b) => b.score - a.score)
+      .slice(0, exploreQuota * topKMultiplier);
 
     const maxPerAuthorTotal = Math.max(
       2,
@@ -482,11 +535,13 @@ feed.get("/home", requireAuth, async (c) => {
       }
     }
 
-    return success({
+    const response = success({
       items: finalPosts,
       nextCursor: feedData.cursor,
       hasMore: feedData.hasMore || explorePosts.length > 0,
     });
+    setCachedResponse(cacheKey, response.clone(), c.executionCtx);
+    return response;
   } catch (error) {
     console.error("Error fetching home feed:", error);
     return serverError("Error fetching feed");
@@ -1125,7 +1180,7 @@ feed.get("/global", async (c) => {
   );
   const cursor = c.req.query("cursor");
 
-  // Optional authentication - get user ID if available
+  let userId: string | null = null;
   let blockedUserIds: string[] = [];
 
   const authHeader = c.req.header("Authorization");
@@ -1138,17 +1193,19 @@ feed.get("/global", async (c) => {
       const payload = await verifyToken(token, secret);
 
       if (payload) {
-        const userId = payload.sub;
+        userId = payload.sub;
         const userDoId = c.env.USER_DO.idFromName(userId);
         const userStub = c.env.USER_DO.get(userDoId);
         const blockedResp = await userStub.fetch("https://do.internal/blocked");
         const blockedData = (await blockedResp.json()) as { blocked: string[] };
         blockedUserIds = blockedData.blocked || [];
       }
-    } catch {
-      // Invalid token, proceed as unauthenticated
-    }
+    } catch {}
   }
+
+  const cacheKey = `feed/global/${userId || "anon"}/${cursor || "start"}/${limit}`;
+  const cached = await getCachedResponse(cacheKey);
+  if (cached) return cached;
 
   try {
     // Decode cursor (offset-based pagination)
@@ -1164,8 +1221,10 @@ feed.get("/global", async (c) => {
       }
     }
 
-    // Try to get pre-computed rankings from cache
-    const cachedData = await c.env.FEEDS_KV.get("explore:ranked");
+    let cachedData = await c.env.FEEDS_KV.get("explore:ranked");
+    if (!cachedData) {
+      cachedData = await c.env.FEEDS_KV.get("explore:ranked:previous");
+    }
 
     if (cachedData) {
       // Fast path: use cached full post data (no additional fetches needed)
@@ -1186,13 +1245,13 @@ feed.get("/global", async (c) => {
       const hasMore = offset + limit < cachedPosts.length;
       const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
 
-      // PERFORMANCE: Trust cached data - it's refreshed every 15 min by cron
-      // No need to re-fetch posts just for engagement metrics
-      return success({
+      const response = success({
         items: paginatedCached,
         nextCursor,
         hasMore,
       });
+      setCachedResponse(cacheKey, response.clone(), c.executionCtx);
+      return response;
     }
 
     // Fallback: compute on-demand (cache miss or first deploy)
@@ -1266,11 +1325,13 @@ feed.get("/global", async (c) => {
       }
     }
 
-    return success({
+    const response = success({
       items: paginatedPosts,
       nextCursor,
       hasMore,
     });
+    setCachedResponse(cacheKey, response.clone(), c.executionCtx);
+    return response;
   } catch (error) {
     console.error("Error fetching global feed:", error);
     return serverError("Error fetching feed");

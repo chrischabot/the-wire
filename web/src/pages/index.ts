@@ -6,8 +6,6 @@ export { PostPage } from "./PostPage";
 export { SettingsPage } from "./SettingsPage";
 export { MutedWordsPage } from "./MutedWordsPage";
 export { AdminPage } from "./AdminPage";
-export { LoginPage } from "./LoginPage";
-export { SignupPage } from "./SignupPage";
 export { SearchPage } from "./SearchPage";
 export { FollowListPage } from "./FollowListPage";
 export { AuthPage } from "./AuthPage";
