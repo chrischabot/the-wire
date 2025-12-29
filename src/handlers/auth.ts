@@ -116,6 +116,7 @@ auth.post("/signup", rateLimit(RATE_LIMITS.signup), async (c) => {
       handle,
       passwordHash,
       salt,
+      authProvider: "legacy",
       createdAt: now,
       lastLogin: now,
     };
@@ -469,7 +470,13 @@ auth.post(
 
       const authUser: AuthUser = JSON.parse(userData);
 
-      // Verify password
+      if (!authUser.passwordHash || !authUser.salt) {
+        log.warn("Login failed - user has no password (Clerk auth)", {
+          userId,
+        });
+        return unauthorized("Please sign in with your social account");
+      }
+
       log.debug("Verifying password", { userId });
       const valid = await verifyPassword(
         body.password,

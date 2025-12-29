@@ -139,44 +139,58 @@ async function updateFoFRankings(env: Env): Promise<void> {
 /**
  * Update Explore page rankings
  * Pre-computes HN-scored posts with author diversity applied
- * OPTIMIZED: Limited batches to stay under subrequest limits
+ * IMPROVED: Scans more posts to capture recent content
  */
 async function updateExploreRankings(env: Env): Promise<void> {
   const scoredPosts: Array<{ post: unknown; score: number; authorId: string }> =
     [];
 
-  // OPTIMIZED: Limit to 40 KV gets per batch, max 2 batches
-  let cursor: string | undefined;
-  const maxBatches = 2;
-  const batchSize = 40;
-  let batchCount = 0;
+  // Scan more posts - list is cheap, individual gets are batched
+  const allKeys: string[] = [];
+  let listCursor: string | undefined;
+  const maxListBatches = 10;
+  let listBatchCount = 0;
 
-  while (batchCount < maxBatches) {
+  while (listBatchCount < maxListBatches) {
     const listResult = await env.POSTS_KV.list({
       prefix: "post:",
-      limit: batchSize,
-      cursor: cursor ?? null,
+      limit: BATCH_SIZE.KV_LIST,
+      cursor: listCursor ?? null,
     });
-    batchCount++;
+    listBatchCount++;
+    allKeys.push(...listResult.keys.map((k) => k.name));
 
-    // Process posts sequentially to control subrequest count
-    for (const key of listResult.keys) {
-      const postData = await env.POSTS_KV.get(key.name);
+    if (listResult.list_complete) break;
+    listCursor = listResult.cursor;
+  }
+
+  // Fetch posts in batches of 6 (Cloudflare's concurrent subrequest limit)
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const LN2 = Math.log(2);
+
+  for (let i = 0; i < allKeys.length; i += 6) {
+    const batchKeys = allKeys.slice(i, i + 6);
+    const batchResults = await Promise.all(
+      batchKeys.map((key) => env.POSTS_KV.get(key)),
+    );
+
+    for (const postData of batchResults) {
       if (!postData) continue;
 
       try {
         const post = JSON.parse(postData);
-        if (post.isDeleted) continue;
+        if (post.isDeleted || post.isTakenDown) continue;
+        // Only include posts from last 7 days for freshness
+        if (post.createdAt < sevenDaysAgo) continue;
 
         const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
-        const LN2 = Math.log(2);
         const recency = Math.exp(
           (-LN2 * ageHours) / SCORING.RECENCY_HALF_LIFE_HOURS,
         );
         const engagement =
-          post.likeCount * SCORING.LIKE_WEIGHT +
-          post.replyCount * SCORING.REPLY_WEIGHT +
-          post.repostCount * SCORING.REPOST_WEIGHT;
+          (post.likeCount || 0) * SCORING.LIKE_WEIGHT +
+          (post.replyCount || 0) * SCORING.REPLY_WEIGHT +
+          (post.repostCount || 0) * SCORING.REPOST_WEIGHT;
         const engScore = Math.log1p(engagement);
         const engDecay = Math.exp(
           (-LN2 * ageHours) / SCORING.ENGAGEMENT_HALF_LIFE_HOURS,
@@ -190,9 +204,6 @@ async function updateExploreRankings(env: Env): Promise<void> {
         // Skip invalid post data
       }
     }
-
-    if (listResult.list_complete) break;
-    cursor = listResult.cursor;
   }
 
   // Sort by score descending

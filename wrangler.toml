@@ -88,6 +88,7 @@ ENVIRONMENT = "development"
 JWT_EXPIRY_HOURS = "24"
 MAX_NOTE_LENGTH = "280"
 FEED_PAGE_SIZE = "20"
+CLERK_PUBLISHABLE_KEY = "pk_test_ZW1pbmVudC1zcGlkZXItNC5jbGVyay5hY2NvdW50cy5kZXYk"
 
 # Production overrides
 [env.production]

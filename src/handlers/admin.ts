@@ -543,6 +543,140 @@ admin.delete("/posts/:id", requireAuth, requireAdmin, async (c) => {
 });
 
 /**
+ * POST /api/admin/repair/refresh-explore - Manually refresh the explore feed rankings
+ * Optimized to avoid subrequest limits by using batched KV gets
+ */
+admin.post(
+  "/repair/refresh-explore",
+  requireAuth,
+  requireAdmin,
+  async (c) => {
+    try {
+      // First, list all post keys
+      const allKeys: string[] = [];
+      let cursor: string | undefined;
+      const maxBatches = 20;
+      let batchCount = 0;
+
+      while (batchCount < maxBatches) {
+        const listResult = await c.env.POSTS_KV.list({
+          prefix: "post:",
+          limit: BATCH_SIZE.KV_LIST,
+          cursor: cursor ?? null,
+        });
+        batchCount++;
+        allKeys.push(...listResult.keys.map((k) => k.name));
+
+        if (listResult.list_complete) break;
+        cursor = listResult.cursor;
+      }
+
+      // Batch fetch all posts using our optimized batchKVGet
+      const postMap = await batchKVGet<PostMetadata>(
+        c.env,
+        allKeys,
+        "POSTS_KV",
+        {
+          parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null),
+        },
+      );
+
+      const scoredPosts: Array<{
+        post: PostMetadata;
+        score: number;
+        authorId: string;
+      }> = [];
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const LN2 = Math.log(2);
+
+      for (const [, post] of postMap) {
+        if (!post) continue;
+        if (post.isDeleted || post.isTakenDown) continue;
+        // Only include posts from last 7 days
+        if (post.createdAt < sevenDaysAgo) continue;
+
+        const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
+        const recency = Math.exp((-LN2 * ageHours) / 12); // 12 hour half-life
+        const engagement =
+          (post.likeCount || 0) * 2 +
+          (post.replyCount || 0) * 3 +
+          (post.repostCount || 0) * 2;
+        const engScore = Math.log1p(engagement);
+        const engDecay = Math.exp((-LN2 * ageHours) / 24); // 24 hour half-life
+        const score = 50 * recency + 30 * engScore * engDecay;
+
+        scoredPosts.push({ post, score, authorId: post.authorId });
+      }
+
+      // Sort by score descending
+      scoredPosts.sort((a, b) => b.score - a.score);
+
+      // Apply author diversity: max 2 posts per author in any 5-post window
+      const diversePosts: typeof scoredPosts = [];
+      const pending = [...scoredPosts];
+      const windowSize = 5;
+      const maxPerAuthorInWindow = 2;
+
+      while (pending.length > 0 && diversePosts.length < 200) {
+        let added = false;
+
+        for (let i = 0; i < pending.length; i++) {
+          const postItem = pending[i]!;
+
+          const windowStart = Math.max(0, diversePosts.length - windowSize + 1);
+          const window = diversePosts.slice(windowStart);
+          const authorCountInWindow = window.filter(
+            (p) => p.authorId === postItem.authorId,
+          ).length;
+
+          if (authorCountInWindow < maxPerAuthorInWindow) {
+            diversePosts.push(postItem);
+            pending.splice(i, 1);
+            added = true;
+            break;
+          }
+        }
+
+        if (!added && pending.length > 0) {
+          diversePosts.push(pending.shift()!);
+        }
+      }
+
+      // Store in KV - full post data for instant loading
+      const cacheData = diversePosts.map((p) => p.post);
+      await c.env.FEEDS_KV.put("explore:ranked", JSON.stringify(cacheData), {
+        expirationTtl: 900, // 15 minutes
+      });
+
+      return c.json({
+        success: true,
+        data: {
+          message: "Explore feed refreshed",
+          totalPostsScanned: allKeys.length,
+          postsInTimeRange: scoredPosts.length,
+          postsInFeed: cacheData.length,
+          topPosts: cacheData.slice(0, 5).map((p) => ({
+            id: p.id,
+            authorHandle: p.authorHandle,
+            content: p.content?.substring(0, 50),
+            createdAt: new Date(p.createdAt).toISOString(),
+          })),
+        },
+      });
+    } catch (error) {
+      console.error("Error refreshing explore:", error);
+      return c.json(
+        {
+          success: false,
+          error: `Error refreshing explore feed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        },
+        500,
+      );
+    }
+  },
+);
+
+/**
  * POST /api/admin/repair/user/:handle/clean-nulls - Remove null entries from following/followers arrays
  */
 admin.post(
@@ -1385,5 +1519,155 @@ admin.post(
     }
   },
 );
+
+/**
+ * GET /api/admin/cron/refresh-explore - Trigger explore feed refresh (for cron/ops use)
+ * Auth options:
+ * 1. JWT_SECRET as query param (?secret=xxx)
+ * 2. Bearer token from admin user (Authorization: Bearer xxx)
+ */
+admin.get("/cron/refresh-explore", async (c) => {
+  const secret = c.req.query("secret");
+  const jwtSecret = c.env.JWT_SECRET;
+  const authHeader = c.req.header("Authorization");
+
+  let authorized = false;
+
+  // Option 1: Secret query param
+  if (secret && secret === jwtSecret) {
+    authorized = true;
+  }
+
+  // Option 2: Bearer token auth (verify it's an admin)
+  if (!authorized && authHeader?.startsWith("Bearer ") && jwtSecret) {
+    const token = authHeader.slice(7);
+    try {
+      const { verifyToken } = await import("../utils/jwt");
+      const payload = await verifyToken(token, jwtSecret);
+      if (payload && payload.sub) {
+        // Verify this user is an admin
+        const doId = c.env.USER_DO.idFromName(payload.sub);
+        const stub = c.env.USER_DO.get(doId);
+        const resp = await stub.fetch("https://do.internal/is-admin");
+        const data = (await resp.json()) as { isAdmin: boolean };
+        if (data.isAdmin) {
+          authorized = true;
+        }
+      }
+    } catch {
+      // Token verification failed, continue to unauthorized
+    }
+  }
+
+  if (!authorized) {
+    return c.json({ success: false, error: "Unauthorized" }, 401);
+  }
+
+  try {
+    // List all post keys
+    const allKeys: string[] = [];
+    let cursor: string | undefined;
+    const maxBatches = 20;
+    let batchCount = 0;
+
+    while (batchCount < maxBatches) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: "post:",
+        limit: BATCH_SIZE.KV_LIST,
+        cursor: cursor ?? null,
+      });
+      batchCount++;
+      allKeys.push(...listResult.keys.map((k) => k.name));
+
+      if (listResult.list_complete) break;
+      cursor = listResult.cursor;
+    }
+
+    // Batch fetch all posts
+    const postMap = await batchKVGet<PostMetadata>(c.env, allKeys, "POSTS_KV", {
+      parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null),
+    });
+
+    const scoredPosts: Array<{
+      post: PostMetadata;
+      score: number;
+      authorId: string;
+    }> = [];
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const LN2 = Math.log(2);
+
+    for (const [, post] of postMap) {
+      if (!post) continue;
+      if (post.isDeleted || post.isTakenDown) continue;
+      if (post.createdAt < sevenDaysAgo) continue;
+
+      const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
+      const recency = Math.exp((-LN2 * ageHours) / 12);
+      const engagement =
+        (post.likeCount || 0) * 2 +
+        (post.replyCount || 0) * 3 +
+        (post.repostCount || 0) * 2;
+      const engScore = Math.log1p(engagement);
+      const engDecay = Math.exp((-LN2 * ageHours) / 24);
+      const score = 50 * recency + 30 * engScore * engDecay;
+
+      scoredPosts.push({ post, score, authorId: post.authorId });
+    }
+
+    scoredPosts.sort((a, b) => b.score - a.score);
+
+    // Apply author diversity
+    const diversePosts: typeof scoredPosts = [];
+    const pending = [...scoredPosts];
+
+    while (pending.length > 0 && diversePosts.length < 200) {
+      let added = false;
+
+      for (let i = 0; i < pending.length; i++) {
+        const postItem = pending[i]!;
+        const windowStart = Math.max(0, diversePosts.length - 4);
+        const window = diversePosts.slice(windowStart);
+        const authorCountInWindow = window.filter(
+          (p) => p.authorId === postItem.authorId,
+        ).length;
+
+        if (authorCountInWindow < 2) {
+          diversePosts.push(postItem);
+          pending.splice(i, 1);
+          added = true;
+          break;
+        }
+      }
+
+      if (!added && pending.length > 0) {
+        diversePosts.push(pending.shift()!);
+      }
+    }
+
+    const cacheData = diversePosts.map((p) => p.post);
+    await c.env.FEEDS_KV.put("explore:ranked", JSON.stringify(cacheData), {
+      expirationTtl: 900,
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        message: "Explore feed refreshed",
+        postsScanned: allKeys.length,
+        postsWithin7Days: scoredPosts.length,
+        finalCount: diversePosts.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in cron refresh-explore:", error);
+    return c.json(
+      {
+        success: false,
+        error: `Error: ${error instanceof Error ? error.message : "Unknown"}`,
+      },
+      500,
+    );
+  }
+});
 
 export default admin;

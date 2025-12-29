@@ -47,6 +47,11 @@ export interface Env {
 
   // External APIs
   ANTHROPIC_API_KEY?: string;
+
+  // Clerk Authentication
+  CLERK_SECRET_KEY?: string;
+  CLERK_PUBLISHABLE_KEY?: string;
+  CLERK_JWT_KEY?: string; // Optional: PEM public key for networkless verification
 }
 
 /**

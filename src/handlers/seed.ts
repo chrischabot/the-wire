@@ -518,6 +518,7 @@ seed.post("/seed/users", requireAdmin, async (c) => {
         handle: userData.handle.toLowerCase(),
         passwordHash,
         salt,
+        authProvider: "legacy",
         createdAt: now,
         lastLogin: now,
       };
@@ -2672,23 +2673,14 @@ seed.post("/seed/showcase-interactions", requireAdmin, async (c) => {
         };
         post.likeCount = newCount;
         await c.env.POSTS_KV.put(`post:${post.id}`, JSON.stringify(post));
-
-        // Track in UserDO
-        const userDoId = c.env.USER_DO.idFromName(user.userId);
-        const userStub = c.env.USER_DO.get(userDoId);
-        await userStub.fetch("https://do.internal/liked-posts/add", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ postId: post.id }),
-        });
-
         likeCount++;
       }
     }
 
-    // Reposts: 5 per user (prefer posts with links)
     const numReposts = 5;
-    const otherPosts = postsWithLinks.filter((p) => p.authorId !== user.userId);
+    const otherPosts = prioritizedPosts.filter(
+      (p) => p.authorId !== user.userId,
+    );
     const shuffledForReposts = [...otherPosts].sort(() => Math.random() - 0.5);
     const postsToRepost = shuffledForReposts.slice(0, numReposts);
 
@@ -2781,14 +2773,8 @@ seed.post("/seed/showcase-interactions", requireAdmin, async (c) => {
         );
       }
 
-      // Track in UserDO
       const userDoId = c.env.USER_DO.idFromName(user.userId);
       const userStub = c.env.USER_DO.get(userDoId);
-      await userStub.fetch("https://do.internal/reposted-posts/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ postId: originalPost.id }),
-      });
       await userStub.fetch("https://do.internal/posts/increment", {
         method: "POST",
       });

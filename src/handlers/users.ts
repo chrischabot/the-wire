@@ -498,7 +498,13 @@ users.get("/:handle/followers", optionalAuth, async (c) => {
   const followersResp = await stub.fetch("https://do.internal/followers");
   const data = (await followersResp.json()) as { followers: string[] };
 
-  const userKeys = data.followers.map((id) => `user:${id}`);
+  // Filter out null/empty IDs
+  const validFollowerIds = data.followers.filter(
+    (id): id is string => id !== null && id !== undefined && id !== "",
+  );
+
+  // First try KV cache for user data
+  const userKeys = validFollowerIds.map((id) => `user:${id}`);
   const userMap = await batchKVGet(c.env, userKeys, "USERS_KV", {
     parse: (val) =>
       val ? safeJsonParse<import("../types/user").AuthUser>(val) : null,
@@ -506,11 +512,48 @@ users.get("/:handle/followers", optionalAuth, async (c) => {
 
   const handlesToFetch: string[] = [];
   const idToHandle = new Map<string, string>();
-  for (const followerId of data.followers) {
+  const missingFromKV: string[] = [];
+
+  for (const followerId of validFollowerIds) {
     const authUser = userMap.get(`user:${followerId}`);
     if (authUser?.handle) {
       handlesToFetch.push(authUser.handle);
       idToHandle.set(followerId, authUser.handle);
+    } else {
+      missingFromKV.push(followerId);
+    }
+  }
+
+  // For users missing from KV, fetch directly from their UserDO
+  const directProfiles = new Map<string, UserProfile>();
+  if (missingFromKV.length > 0) {
+    const profileFetches = missingFromKV.map(async (followerId) => {
+      try {
+        const followerDoId = c.env.USER_DO.idFromName(followerId);
+        const followerStub = c.env.USER_DO.get(followerDoId);
+        const profileResp = await followerStub.fetch(
+          "https://do.internal/profile",
+        );
+        if (profileResp.ok) {
+          const profile = (await profileResp.json()) as UserProfile;
+          return { followerId, profile };
+        }
+      } catch {
+        // User DO doesn't exist or errored
+      }
+      return { followerId, profile: null };
+    });
+
+    // Process in chunks of 6 to respect concurrent connection limits
+    for (let i = 0; i < profileFetches.length; i += 6) {
+      const chunk = profileFetches.slice(i, i + 6);
+      const results = await Promise.all(chunk);
+      for (const { followerId, profile } of results) {
+        if (profile) {
+          directProfiles.set(followerId, profile);
+          idToHandle.set(followerId, profile.handle);
+        }
+      }
     }
   }
 
@@ -543,10 +586,32 @@ users.get("/:handle/followers", optionalAuth, async (c) => {
   }
 
   const followers: (UserProfile & { isFollowing?: boolean })[] = [];
-  for (const followerId of data.followers) {
-    const followerHandle = idToHandle.get(followerId);
-    if (!followerHandle) continue;
-    const profile = profileMap.get(`profile:${followerHandle}`);
+  for (const followerId of validFollowerIds) {
+    // Try direct profile first (for users missing from KV), then KV cache
+    let profile = directProfiles.get(followerId);
+    if (!profile) {
+      const followerHandle = idToHandle.get(followerId);
+      if (followerHandle) {
+        profile = profileMap.get(`profile:${followerHandle}`) ?? undefined;
+      }
+    }
+
+    // Last resort: try fetching from UserDO if still missing
+    if (!profile) {
+      try {
+        const followerDoId = c.env.USER_DO.idFromName(followerId);
+        const followerStub = c.env.USER_DO.get(followerDoId);
+        const profileResp = await followerStub.fetch(
+          "https://do.internal/profile",
+        );
+        if (profileResp.ok) {
+          profile = (await profileResp.json()) as UserProfile;
+        }
+      } catch {
+        // Skip this user
+      }
+    }
+
     if (profile) {
       const followerProfile: UserProfile & { isFollowing?: boolean } = {
         ...profile,
@@ -583,7 +648,13 @@ users.get("/:handle/following", optionalAuth, async (c) => {
   const followingResp = await stub.fetch("https://do.internal/following");
   const data = (await followingResp.json()) as { following: string[] };
 
-  const userKeys = data.following.map((id) => `user:${id}`);
+  // Filter out null/empty IDs
+  const validFollowingIds = data.following.filter(
+    (id): id is string => id !== null && id !== undefined && id !== "",
+  );
+
+  // First try KV cache for user data
+  const userKeys = validFollowingIds.map((id) => `user:${id}`);
   const userMap = await batchKVGet(c.env, userKeys, "USERS_KV", {
     parse: (val) =>
       val ? safeJsonParse<import("../types/user").AuthUser>(val) : null,
@@ -591,11 +662,48 @@ users.get("/:handle/following", optionalAuth, async (c) => {
 
   const handlesToFetch: string[] = [];
   const idToHandle = new Map<string, string>();
-  for (const followingId of data.following) {
+  const missingFromKV: string[] = [];
+
+  for (const followingId of validFollowingIds) {
     const authUser = userMap.get(`user:${followingId}`);
     if (authUser?.handle) {
       handlesToFetch.push(authUser.handle);
       idToHandle.set(followingId, authUser.handle);
+    } else {
+      missingFromKV.push(followingId);
+    }
+  }
+
+  // For users missing from KV, fetch directly from their UserDO
+  const directProfiles = new Map<string, UserProfile>();
+  if (missingFromKV.length > 0) {
+    const profileFetches = missingFromKV.map(async (followingId) => {
+      try {
+        const followingDoId = c.env.USER_DO.idFromName(followingId);
+        const followingStub = c.env.USER_DO.get(followingDoId);
+        const profileResp = await followingStub.fetch(
+          "https://do.internal/profile",
+        );
+        if (profileResp.ok) {
+          const profile = (await profileResp.json()) as UserProfile;
+          return { followingId, profile };
+        }
+      } catch {
+        // User DO doesn't exist or errored
+      }
+      return { followingId, profile: null };
+    });
+
+    // Process in chunks of 6 to respect concurrent connection limits
+    for (let i = 0; i < profileFetches.length; i += 6) {
+      const chunk = profileFetches.slice(i, i + 6);
+      const results = await Promise.all(chunk);
+      for (const { followingId, profile } of results) {
+        if (profile) {
+          directProfiles.set(followingId, profile);
+          idToHandle.set(followingId, profile.handle);
+        }
+      }
     }
   }
 
@@ -628,10 +736,32 @@ users.get("/:handle/following", optionalAuth, async (c) => {
   }
 
   const following: (UserProfile & { isFollowing?: boolean })[] = [];
-  for (const followingId of data.following) {
-    const followingHandle = idToHandle.get(followingId);
-    if (!followingHandle) continue;
-    const profile = profileMap.get(`profile:${followingHandle}`);
+  for (const followingId of validFollowingIds) {
+    // Try direct profile first (for users missing from KV), then KV cache
+    let profile = directProfiles.get(followingId);
+    if (!profile) {
+      const followingHandle = idToHandle.get(followingId);
+      if (followingHandle) {
+        profile = profileMap.get(`profile:${followingHandle}`) ?? undefined;
+      }
+    }
+
+    // Last resort: try fetching from UserDO if still missing
+    if (!profile) {
+      try {
+        const followingDoId = c.env.USER_DO.idFromName(followingId);
+        const followingStub = c.env.USER_DO.get(followingDoId);
+        const profileResp = await followingStub.fetch(
+          "https://do.internal/profile",
+        );
+        if (profileResp.ok) {
+          profile = (await profileResp.json()) as UserProfile;
+        }
+      } catch {
+        // Skip this user
+      }
+    }
+
     if (profile) {
       const followingProfile: UserProfile & { isFollowing?: boolean } = {
         ...profile,

@@ -2,15 +2,16 @@
  * User-related type definitions for The Wire
  */
 
-/**
- * Authentication user stored in KV
- */
+export type AuthProvider = "legacy" | "clerk";
+
 export interface AuthUser {
   id: string;
   email: string;
   handle: string;
-  passwordHash: string;
-  salt: string;
+  passwordHash?: string;
+  salt?: string;
+  clerkId?: string;
+  authProvider: AuthProvider;
   createdAt: number;
   lastLogin: number;
 }

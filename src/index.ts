@@ -8,6 +8,7 @@ import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "./types/env";
 import authRoutes from "./handlers/auth";
+import clerkAuthRoutes from "./handlers/clerk-auth";
 import usersRoutes from "./handlers/users";
 import postsRoutes from "./handlers/posts";
 import mediaRoutes from "./handlers/media";
@@ -21,6 +22,7 @@ import unfurlRoutes from "./handlers/unfurl";
 import batchRoutes from "./handlers/batch";
 import { rateLimit, RATE_LIMITS } from "./middleware/rate-limit";
 import { csrfProtection } from "./middleware/csrf";
+import { clerkAuthMiddleware } from "./middleware/clerk-auth";
 import { handleScheduled } from "./handlers/scheduled";
 import { getStyles } from "./styles";
 import { getClientJS } from "./client-js";
@@ -29,8 +31,8 @@ import { getLandingPage } from "./pages/landing";
 // Create Hono app with environment typing
 const app = new Hono<{ Bindings: Env }>();
 
-// Global middleware
 app.use("*", cors());
+app.use("/api/*", clerkAuthMiddleware);
 
 // Request body size limit (1MB for JSON, handled separately for multipart)
 app.use(
@@ -63,9 +65,12 @@ app.use(
     exemptPaths: [
       "/api/auth/login",
       "/api/auth/signup",
+      "/api/clerk/session",
+      "/api/clerk/handles/check",
+      "/api/clerk/onboarding/complete",
       "/health",
-      "/debug/reset", // For testing database reset
-      "/debug/bootstrap-admin", // For bootstrapping first admin
+      "/debug/reset",
+      "/debug/bootstrap-admin",
     ],
   }),
 );
@@ -99,9 +104,13 @@ async function serveSPA(c: import("hono").Context<{ Bindings: Env }>) {
   return c.html(html);
 }
 
-// React SPA routes - all handled by client-side router
 app.get("/signup", (c) => serveSPA(c));
 app.get("/login", (c) => serveSPA(c));
+app.get("/auth", (c) => serveSPA(c));
+app.get("/auth/*", (c) => serveSPA(c));
+app.get("/post-auth", (c) => serveSPA(c));
+app.get("/onboarding", (c) => serveSPA(c));
+app.get("/onboarding/*", (c) => serveSPA(c));
 app.get("/home", (c) => serveSPA(c));
 app.get("/search", (c) => serveSPA(c));
 app.get("/explore", (c) => serveSPA(c));
@@ -184,8 +193,8 @@ app.get("/api/ws", async (c) => {
   }
 });
 
-// Mount auth routes
 app.route("/api/auth", authRoutes);
+app.route("/api/clerk", clerkAuthRoutes);
 
 // Mount users routes
 app.route("/api/users", usersRoutes);

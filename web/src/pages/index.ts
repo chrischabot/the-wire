@@ -10,3 +10,6 @@ export { LoginPage } from "./LoginPage";
 export { SignupPage } from "./SignupPage";
 export { SearchPage } from "./SearchPage";
 export { FollowListPage } from "./FollowListPage";
+export { AuthPage } from "./AuthPage";
+export { PostAuthPage } from "./PostAuthPage";
+export { HandleOnboardingPage } from "./HandleOnboardingPage";

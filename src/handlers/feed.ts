@@ -181,33 +181,41 @@ feed.get("/home", requireAuth, async (c) => {
 
     // Fallback: compute explore posts on-demand if cache is empty
     if (!rawExplorePosts || rawExplorePosts.length === 0) {
-      const onDemandPosts: PostMetadata[] = [];
-      let postCursor: string | undefined;
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-      while (onDemandPosts.length < 100) {
+      // List keys first, then batch fetch
+      const allKeys: string[] = [];
+      let postCursor: string | undefined;
+      const maxBatches = 3; // Limit batches for quick fallback
+      let batchCount = 0;
+
+      while (batchCount < maxBatches) {
         const listResult = await c.env.POSTS_KV.list({
           prefix: "post:",
           limit: BATCH_SIZE.KV_LIST,
           ...(postCursor ? { cursor: postCursor } : {}),
         });
-
-        for (const key of listResult.keys) {
-          const postData = await c.env.POSTS_KV.get(key.name);
-          if (!postData) continue;
-          const post = safeJsonParse<PostMetadata>(postData);
-          if (!post) continue;
-          if (post.isDeleted || post.isTakenDown) continue;
-          if (post.createdAt < sevenDaysAgo) continue;
-          onDemandPosts.push(post);
-        }
-
+        batchCount++;
+        allKeys.push(...listResult.keys.map((k) => k.name));
         if (listResult.list_complete) break;
         postCursor = listResult.cursor;
       }
 
+      // Batch fetch all posts at once
+      const postMap = await batchKVGet<PostMetadata>(c.env, allKeys, "POSTS_KV", {
+        parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null),
+      });
+
+      const onDemandPosts: PostMetadata[] = [];
+      for (const [, post] of postMap) {
+        if (!post) continue;
+        if (post.isDeleted || post.isTakenDown) continue;
+        if (post.createdAt < sevenDaysAgo) continue;
+        onDemandPosts.push(post);
+      }
+
       onDemandPosts.sort((a, b) => b.createdAt - a.createdAt);
-      rawExplorePosts = onDemandPosts;
+      rawExplorePosts = onDemandPosts.slice(0, 100);
     }
 
     if (rawExplorePosts) {
@@ -244,42 +252,8 @@ feed.get("/home", requireAuth, async (c) => {
       }
     }
 
-    if (explorePosts.length > 0) {
-      const allExploreIds = new Set<string>();
-      for (const p of explorePosts) {
-        allExploreIds.add(p.id);
-        if (p.repostOfId) allExploreIds.add(p.repostOfId);
-      }
-      const freshExploreMap = await batchKVGet<PostMetadata>(
-        c.env,
-        [...allExploreIds].map((id) => `post:${id}`),
-        "POSTS_KV",
-        { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
-      );
-      explorePosts = explorePosts.map((cached) => {
-        const fresh = freshExploreMap.get(`post:${cached.id}`);
-        const result = fresh
-          ? {
-              ...fresh,
-              source: cached.source,
-              hasLiked: false,
-              hasReposted: false,
-            }
-          : cached;
-        if (result.repostOfId && result.originalPost) {
-          const freshOrig = freshExploreMap.get(`post:${result.repostOfId}`);
-          if (freshOrig) {
-            result.originalPost = {
-              ...result.originalPost,
-              likeCount: freshOrig.likeCount,
-              replyCount: freshOrig.replyCount,
-              repostCount: freshOrig.repostCount,
-            };
-          }
-        }
-        return result;
-      });
-    }
+    // PERFORMANCE: Trust cached explore data - no re-fetch needed
+    // The explore:ranked cache is refreshed every 15 min by cron job
 
     // Backfill: pull recent posts from followed users when FeedDO is empty/sparse
     const uniqueAuthors = new Set(followedPosts.map((post) => post.authorId));
@@ -1212,70 +1186,49 @@ feed.get("/global", async (c) => {
       const hasMore = offset + limit < cachedPosts.length;
       const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
 
-      const allIds = new Set<string>();
-      for (const p of paginatedCached) {
-        allIds.add(p.id);
-        if (p.repostOfId) allIds.add(p.repostOfId);
-      }
-
-      const freshMap = await batchKVGet<PostMetadata>(
-        c.env,
-        [...allIds].map((id) => `post:${id}`),
-        "POSTS_KV",
-        { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
-      );
-
-      const paginatedPosts = paginatedCached.map((cached) => {
-        const fresh = freshMap.get(`post:${cached.id}`) || cached;
-        if (fresh.repostOfId && fresh.originalPost) {
-          const freshOriginal = freshMap.get(`post:${fresh.repostOfId}`);
-          if (freshOriginal) {
-            fresh.originalPost = {
-              ...fresh.originalPost,
-              likeCount: freshOriginal.likeCount,
-              replyCount: freshOriginal.replyCount,
-              repostCount: freshOriginal.repostCount,
-            };
-          }
-        }
-        return fresh;
-      });
-
+      // PERFORMANCE: Trust cached data - it's refreshed every 15 min by cron
+      // No need to re-fetch posts just for engagement metrics
       return success({
-        items: paginatedPosts,
+        items: paginatedCached,
         nextCursor,
         hasMore,
       });
     }
 
     // Fallback: compute on-demand (cache miss or first deploy)
-    const allPosts: PostMetadata[] = [];
-    let postCursor: string | undefined;
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const blockedSet = new Set(blockedUserIds);
 
-    while (allPosts.length < 200) {
+    // List keys first, then batch fetch
+    const allKeys: string[] = [];
+    let postCursor: string | undefined;
+    const maxBatches = 5;
+    let batchCount = 0;
+
+    while (batchCount < maxBatches) {
       const listResult = await c.env.POSTS_KV.list({
         prefix: "post:",
         limit: BATCH_SIZE.KV_LIST,
         ...(postCursor ? { cursor: postCursor } : {}),
       });
-
-      for (const key of listResult.keys) {
-        const postData = await c.env.POSTS_KV.get(key.name);
-        if (!postData) continue;
-
-        const post = safeJsonParse<PostMetadata>(postData);
-        if (!post) continue;
-        if (post.isDeleted || post.isTakenDown) continue;
-        if (blockedUserIds.length > 0 && blockedUserIds.includes(post.authorId))
-          continue;
-        if (post.createdAt < sevenDaysAgo) continue;
-
-        allPosts.push(post);
-      }
-
+      batchCount++;
+      allKeys.push(...listResult.keys.map((k) => k.name));
       if (listResult.list_complete) break;
       postCursor = listResult.cursor;
+    }
+
+    // Batch fetch all posts at once
+    const postMap = await batchKVGet<PostMetadata>(c.env, allKeys, "POSTS_KV", {
+      parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null),
+    });
+
+    const allPosts: PostMetadata[] = [];
+    for (const [, post] of postMap) {
+      if (!post) continue;
+      if (post.isDeleted || post.isTakenDown) continue;
+      if (blockedSet.size > 0 && blockedSet.has(post.authorId)) continue;
+      if (post.createdAt < sevenDaysAgo) continue;
+      allPosts.push(post);
     }
 
     // Score, sort, and apply diversity

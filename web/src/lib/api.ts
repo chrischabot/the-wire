@@ -2,6 +2,12 @@ import { useAuthStore } from "../stores/authStore";
 
 const API_BASE = "/api";
 
+let clerkTokenGetter: (() => Promise<string | null>) | null = null;
+
+export function setClerkTokenGetter(getter: () => Promise<string | null>) {
+  clerkTokenGetter = getter;
+}
+
 export interface User {
   id: string;
   handle: string;
@@ -116,8 +122,17 @@ async function apiRequest<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  let authToken = token;
+
+  if (clerkTokenGetter) {
+    const clerkToken = await clerkTokenGetter().catch(() => null);
+    if (clerkToken) {
+      authToken = clerkToken;
+    }
+  }
+
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
   }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
