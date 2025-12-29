@@ -78,13 +78,32 @@ interface FeedPost extends PostMetadata {
  */
 feed.get("/home", requireAuth, async (c) => {
   const userId = c.get("userId");
-  const cursor = c.req.query("cursor");
+  const cursorParam = c.req.query("cursor");
   const limit = Math.min(
     parseInt(c.req.query("limit") || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10),
     LIMITS.MAX_PAGINATION_LIMIT,
   );
 
-  const cacheKey = `feed/home/${userId}/${cursor || "start"}/${limit}`;
+  let feedCursor: string | undefined;
+  let exploreOffset = 0;
+  if (cursorParam) {
+    try {
+      const decoded = safeAtob(cursorParam);
+      if (decoded) {
+        const parsed = safeJsonParse<{ f?: string; e?: number }>(decoded);
+        if (parsed) {
+          feedCursor = parsed.f;
+          exploreOffset = parsed.e || 0;
+        } else {
+          feedCursor = cursorParam;
+        }
+      }
+    } catch {
+      feedCursor = cursorParam;
+    }
+  }
+
+  const cacheKey = `feed/home/${userId}/${cursorParam || "start"}/${limit}`;
   const cached = await getCachedResponse(cacheKey);
   if (cached) return cached;
 
@@ -159,11 +178,10 @@ feed.get("/home", requireAuth, async (c) => {
       return false;
     };
 
-    // SINGLE CALL 2: Get feed with full post data from FeedDO
     const feedDoId = c.env.FEED_DO.idFromName(userId);
     const feedStub = c.env.FEED_DO.get(feedDoId);
     const feedUrl = new URL("https://do.internal/feed-with-posts");
-    if (cursor) feedUrl.searchParams.set("cursor", cursor);
+    if (feedCursor) feedUrl.searchParams.set("cursor", feedCursor);
     feedUrl.searchParams.set("limit", (limit * 3).toString());
 
     const feedResp = await feedStub.fetch(feedUrl.toString());
@@ -259,9 +277,12 @@ feed.get("/home", requireAuth, async (c) => {
       rawExplorePosts = onDemandPosts.slice(0, 100);
     }
 
+    let explorePostsConsumed = 0;
     if (rawExplorePosts) {
-      for (const post of rawExplorePosts) {
+      const paginatedExplore = rawExplorePosts.slice(exploreOffset);
+      for (const post of paginatedExplore) {
         if (explorePosts.length >= limit) break;
+        explorePostsConsumed++;
         if (seenPostIds.has(post.id)) continue;
         if (blockedSet.has(post.authorId)) continue;
         if (post.isDeleted || post.isTakenDown) continue;
@@ -535,10 +556,23 @@ feed.get("/home", requireAuth, async (c) => {
       }
     }
 
+    const newExploreOffset = exploreOffset + explorePostsConsumed;
+    const hasMoreExplore = rawExplorePosts
+      ? newExploreOffset < rawExplorePosts.length
+      : false;
+    const hasMore = feedData.hasMore || hasMoreExplore;
+
+    let nextCursor: string | null = null;
+    if (hasMore) {
+      nextCursor = btoa(
+        JSON.stringify({ f: feedData.cursor, e: newExploreOffset }),
+      );
+    }
+
     const response = success({
       items: finalPosts,
-      nextCursor: feedData.cursor,
-      hasMore: feedData.hasMore || explorePosts.length > 0,
+      nextCursor,
+      hasMore,
     });
     setCachedResponse(cacheKey, response.clone(), c.executionCtx);
     return response;

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useClerk } from "@clerk/clerk-react";
 import { Camera } from "lucide-react";
 import { AppLayout } from "../components/layout";
 import { usersApi, authApi, mediaApi } from "../lib/api";
@@ -212,6 +213,7 @@ const styles = {
 export function SettingsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { signOut } = useClerk();
   const currentTheme = useThemeStore((s) => s.current);
   const setTheme = useThemeStore((s) => s.setTheme);
   const logout = useAuthStore((s) => s.logout);
@@ -338,7 +340,8 @@ export function SettingsPage() {
       /* intentionally empty */
     }
     logout();
-    navigate("/login");
+    await signOut();
+    navigate("/auth");
   };
 
   const rightSidebar = (

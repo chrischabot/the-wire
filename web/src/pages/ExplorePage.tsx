@@ -89,7 +89,15 @@ export function ExplorePage() {
     staleTime: 1000 * 60 * 3,
   });
 
-  const posts = data?.pages.flatMap((page) => page?.items ?? []) ?? [];
+  const posts = (() => {
+    const all = data?.pages.flatMap((page) => page?.items ?? []) ?? [];
+    const seen = new Set<string>();
+    return all.filter((post) => {
+      if (seen.has(post.id)) return false;
+      seen.add(post.id);
+      return true;
+    });
+  })();
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
