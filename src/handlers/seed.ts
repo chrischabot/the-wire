@@ -2930,4 +2930,346 @@ seed.post("/seed/showcase-interactions", requireAdmin, async (c) => {
   }
 });
 
+/**
+ * Generate engaging conversations for posts with 0 replies
+ * POST /debug/generate-conversations
+ *
+ * Query params:
+ * - limit: max posts to process (default 10)
+ * - minReplies: target minimum replies per post (default 3)
+ */
+seed.post("/generate-conversations", requireAdmin, async (c) => {
+  if (!c.env.ANTHROPIC_API_KEY) {
+    return c.json({ success: false, error: "ANTHROPIC_API_KEY not configured" }, 500);
+  }
+
+  const limit = parseInt(c.req.query("limit") || "10");
+  const minReplies = parseInt(c.req.query("minReplies") || "3");
+  const log: string[] = [];
+
+  try {
+    // Find posts with 0 replies
+    const postsNeedingReplies: PostMetadata[] = [];
+    let cursor: string | undefined;
+    let scannedBatches = 0;
+
+    while (scannedBatches < 30 && postsNeedingReplies.length < limit) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: "post:",
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      scannedBatches++;
+
+      for (const key of listResult.keys) {
+        if (postsNeedingReplies.length >= limit) break;
+
+        const postData = await c.env.POSTS_KV.get(key.name);
+        if (!postData) continue;
+
+        const post = JSON.parse(postData) as PostMetadata;
+
+        // Skip deleted, replies, reposts, and posts that already have replies
+        if (post.isDeleted || post.replyToId || post.repostOfId) continue;
+        if ((post.replyCount || 0) > 0) continue;
+
+        // Only process posts from seed users
+        const isSeedUser = SEED_USERS.some(u => u.handle.toLowerCase() === post.authorHandle.toLowerCase());
+        if (!isSeedUser) continue;
+
+        postsNeedingReplies.push(post);
+      }
+
+      if (listResult.list_complete) break;
+      cursor = listResult.cursor;
+    }
+
+    log.push(`Found ${postsNeedingReplies.length} posts needing conversations`);
+
+    if (postsNeedingReplies.length === 0) {
+      return c.json({ success: true, message: "No posts need conversations", log });
+    }
+
+    // Process each post
+    const results: Array<{ postId: string; author: string; repliesAdded: number; likesAdded: number }> = [];
+
+    for (const post of postsNeedingReplies) {
+      try {
+        const result = await generateConversationForPost(
+          c.env,
+          c.env.ANTHROPIC_API_KEY,
+          post,
+          minReplies,
+        );
+        results.push(result);
+        log.push(`${post.authorHandle}: added ${result.repliesAdded} replies, ${result.likesAdded} likes`);
+
+        // Small delay between posts to respect rate limits
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (err) {
+        log.push(`Error on ${post.id}: ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    }
+
+    return c.json({
+      success: true,
+      processed: results.length,
+      totalReplies: results.reduce((sum, r) => sum + r.repliesAdded, 0),
+      totalLikes: results.reduce((sum, r) => sum + r.likesAdded, 0),
+      results,
+      log,
+    });
+  } catch (error) {
+    const err = error instanceof Error ? error.message : String(error);
+    log.push(`Error: ${err}`);
+    return c.json({ success: false, error: err, log }, 500);
+  }
+});
+
+/**
+ * Generate conversation for a single post
+ */
+async function generateConversationForPost(
+  env: Env,
+  apiKey: string,
+  post: PostMetadata,
+  targetReplies: number,
+): Promise<{ postId: string; author: string; repliesAdded: number; likesAdded: number }> {
+  // Get author profile
+  const authorSeed = SEED_USERS.find(u => u.handle.toLowerCase() === post.authorHandle.toLowerCase());
+  if (!authorSeed) {
+    throw new Error(`Author ${post.authorHandle} not in seed users`);
+  }
+
+  // Select responders (different from author)
+  const otherUsers = SEED_USERS.filter(u => u.handle.toLowerCase() !== post.authorHandle.toLowerCase());
+  const shuffled = [...otherUsers].sort(() => Math.random() - 0.5);
+  const responders = shuffled.slice(0, Math.min(targetReplies + 2, shuffled.length));
+
+  // Generate replies using Claude
+  const replies = await generateRepliesForPost(apiKey, post, authorSeed, responders, targetReplies);
+
+  // Create replies in the system
+  let repliesAdded = 0;
+  let likesAdded = 0;
+  const handleToPostId = new Map<string, string>();
+  handleToPostId.set(post.authorHandle.toLowerCase(), post.id);
+
+  for (const reply of replies) {
+    // Get user ID for responder
+    const userId = await env.USERS_KV.get(`handle:${reply.handle.toLowerCase()}`);
+    if (!userId) continue;
+
+    // Get responder profile for avatar
+    const responderSeed = SEED_USERS.find(u => u.handle.toLowerCase() === reply.handle.toLowerCase());
+    if (!responderSeed) continue;
+
+    // Determine what this reply is responding to
+    let replyToId = post.id;
+    if (reply.replyToHandle && handleToPostId.has(reply.replyToHandle.toLowerCase())) {
+      replyToId = handleToPostId.get(reply.replyToHandle.toLowerCase())!;
+    }
+
+    // Create the reply
+    const replyId = generateId();
+    const replyTimestamp = post.createdAt + (reply.timeOffsetMinutes * 60 * 1000);
+
+    const replyPost: PostMetadata = {
+      id: replyId,
+      content: reply.content,
+      authorId: userId,
+      authorHandle: reply.handle.toLowerCase(),
+      authorDisplayName: responderSeed.displayName,
+      authorAvatarUrl: responderSeed.avatarUrl,
+      createdAt: replyTimestamp,
+      mediaUrls: [],
+      likeCount: 0,
+      replyCount: 0,
+      repostCount: 0,
+      quoteCount: 0,
+      replyToId,
+    };
+
+    // Store in KV
+    await env.POSTS_KV.put(`post:${replyId}`, JSON.stringify(replyPost));
+
+    // Update replies index
+    const repliesKey = `replies:${replyToId}`;
+    const existingReplies = await env.POSTS_KV.get(repliesKey);
+    const replyIds: string[] = existingReplies ? JSON.parse(existingReplies) : [];
+    replyIds.push(replyId);
+    await env.POSTS_KV.put(repliesKey, JSON.stringify(replyIds));
+
+    // Update parent post's reply count
+    const parentData = await env.POSTS_KV.get(`post:${replyToId}`);
+    if (parentData) {
+      const parentPost = JSON.parse(parentData) as PostMetadata;
+      parentPost.replyCount = (parentPost.replyCount || 0) + 1;
+      await env.POSTS_KV.put(`post:${replyToId}`, JSON.stringify(parentPost));
+    }
+
+    // Update user's post count
+    const userDoId = env.USER_DO.idFromName(userId);
+    const userStub = env.USER_DO.get(userDoId);
+    await userStub.fetch("https://do.internal/posts/increment", { method: "POST" });
+
+    handleToPostId.set(reply.handle.toLowerCase(), replyId);
+    repliesAdded++;
+
+    // Small delay
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  // Add likes to the original post and replies
+  const allPostIds = [post.id, ...Array.from(handleToPostId.values()).filter(id => id !== post.id)];
+
+  for (const targetPostId of allPostIds) {
+    // Random number of likes (2-8 for original, 1-4 for replies)
+    const isOriginal = targetPostId === post.id;
+    const likeCount = isOriginal
+      ? Math.floor(Math.random() * 7) + 2
+      : Math.floor(Math.random() * 4) + 1;
+
+    const likers = [...otherUsers].sort(() => Math.random() - 0.5).slice(0, likeCount);
+
+    for (const liker of likers) {
+      const likerId = await env.USERS_KV.get(`handle:${liker.handle.toLowerCase()}`);
+      if (!likerId) continue;
+
+      // Update PostDO
+      try {
+        const postDoId = env.POST_DO.idFromName(targetPostId);
+        const postStub = env.POST_DO.get(postDoId);
+        await postStub.fetch("https://do.internal/like", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: likerId }),
+        });
+
+        // Update UserDO
+        const userDoId = env.USER_DO.idFromName(likerId);
+        const userStub = env.USER_DO.get(userDoId);
+        await userStub.fetch("https://do.internal/add-liked-post", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ postId: targetPostId }),
+        });
+
+        // Update KV cache
+        const postData = await env.POSTS_KV.get(`post:${targetPostId}`);
+        if (postData) {
+          const postObj = JSON.parse(postData) as PostMetadata;
+          postObj.likeCount = (postObj.likeCount || 0) + 1;
+          await env.POSTS_KV.put(`post:${targetPostId}`, JSON.stringify(postObj));
+        }
+
+        likesAdded++;
+      } catch {
+        // Ignore like errors (might already be liked)
+      }
+    }
+  }
+
+  return { postId: post.id, author: post.authorHandle, repliesAdded, likesAdded };
+}
+
+/**
+ * Generate replies using Claude API
+ */
+async function generateRepliesForPost(
+  apiKey: string,
+  post: PostMetadata,
+  author: typeof SEED_USERS[0],
+  responders: typeof SEED_USERS,
+  targetReplies: number,
+): Promise<Array<{ handle: string; content: string; replyToHandle: string | null; timeOffsetMinutes: number }>> {
+  const responderInfo = responders.map(r =>
+    `@${r.handle} (${r.displayName}): ${r.bio}`
+  ).join("\n");
+
+  const systemPrompt = `You are generating replies for a conversation thread on a Twitter-like AI/tech platform called The Wire.
+
+Generate ${targetReplies} authentic, engaging replies from different personas. Each reply should:
+- Be max 280 characters
+- Sound like that specific person based on their bio/expertise
+- Engage meaningfully with the post or previous replies
+- Use varied tones: agree enthusiastically, respectfully disagree, ask follow-up questions, share related experience, add technical detail, make relevant observations, express curiosity, offer alternative perspectives
+
+IMPORTANT RULES:
+1. Make conversations feel NATURAL - not everyone agrees, some ask questions, some share experiences
+2. Some replies should respond to OTHER replies (not just the original), creating a real conversation thread
+3. Vary the tone - don't make everyone sound impressed or enthusiastic
+4. Include at least one slightly skeptical or questioning reply
+5. Keep replies concise and punchy like real social media
+
+Output a JSON array where each item has:
+- handle: the replier's handle (no @ symbol)
+- content: the reply text (max 280 chars)
+- replyToHandle: handle being replied to, or null for original post
+- timeOffsetMinutes: realistic time offset from original post (5-180 minutes)
+
+Output ONLY valid JSON, no markdown formatting or code blocks.`;
+
+  const userPrompt = `Original post by @${author.handle} (${author.displayName}):
+Bio: ${author.bio}
+
+"${post.content}"
+
+Generate ${targetReplies} engaging replies from these personas:
+${responderInfo}
+
+Create a natural conversation thread. Some replies should respond to other replies (use replyToHandle). Make it feel like a real discussion with different perspectives.`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1500,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Claude API error: ${response.status}`);
+  }
+
+  const data = (await response.json()) as { content: Array<{ text: string }> };
+  const text = data.content[0]?.text || "[]";
+
+  // Parse JSON (handle potential markdown wrapping)
+  let jsonText = text;
+  if (text.includes("```json")) {
+    jsonText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+  } else if (text.includes("```")) {
+    jsonText = text.replace(/```\n?/g, "");
+  }
+
+  try {
+    const replies = JSON.parse(jsonText.trim());
+    // Validate and normalize
+    return replies
+      .filter((r: unknown): r is { handle: string; content: string } =>
+        typeof r === "object" &&
+        r !== null &&
+        typeof (r as Record<string, unknown>).handle === "string" &&
+        typeof (r as Record<string, unknown>).content === "string"
+      )
+      .map((r: { handle: string; content: string; replyToHandle?: string; timeOffsetMinutes?: number }) => ({
+        handle: r.handle.replace("@", ""),
+        content: r.content.slice(0, 280),
+        replyToHandle: r.replyToHandle?.replace("@", "") || null,
+        timeOffsetMinutes: r.timeOffsetMinutes || Math.floor(Math.random() * 120) + 5,
+      }))
+      .slice(0, targetReplies);
+  } catch {
+    return [];
+  }
+}
+
 export default seed;

@@ -25,6 +25,8 @@ npm run test:api     # API integration tests
 | **Cache (Global)**        | KV Namespaces      | Profiles, posts, sessions, search indexes |
 | **Media**                 | R2                 | Images, videos                            |
 | **Async**                 | Queues             | Post fanout to follower feeds             |
+| **AI Services**           | Claude API         | News processing, conversation generation  |
+| **Auth**                  | Clerk + Legacy JWT | OAuth (Google/Apple) + email/password     |
 | **Frontend**              | React + Vite       | SPA in `/web`                             |
 
 ### Data Flow Mental Model
@@ -146,17 +148,19 @@ await env.FANOUT_QUEUE.send({
 ```
 src/
 ├── index.ts                 # Worker entry, route mounting, queue consumer
-├── constants.ts             # LIMITS, CACHE_TTL, SCORING, BATCH_SIZE
+├── constants.ts             # LIMITS, CACHE_TTL, SCORING, BATCH_SIZE, RETENTION
 ├── styles.ts                # Inline CSS for SSR pages
+├── client-js.ts             # Client-side JavaScript for SSR pages
 │
 ├── durable-objects/
 │   ├── UserDO.ts           # User state, social graph, settings
 │   ├── PostDO.ts           # Post interactions (likes, reposts)
 │   ├── FeedDO.ts           # Per-user feed management
-│   └── WebSocketDO.ts      # Real-time connections
+│   └── WebSocketDO.ts      # Real-time WebSocket connections
 │
 ├── handlers/
-│   ├── auth.ts             # Signup, login, password reset
+│   ├── auth.ts             # Legacy signup, login, password reset (JWT)
+│   ├── clerk-auth.ts       # Clerk OAuth integration (Google/Apple)
 │   ├── users.ts            # Profile CRUD, follow/block
 │   ├── posts.ts            # Create, like, repost, delete, thread/replies
 │   ├── feed.ts             # Home feed, explore, chronological
@@ -166,32 +170,39 @@ src/
 │   ├── batch.ts            # Batch API endpoints
 │   ├── admin.ts            # Admin dashboard, user/post management
 │   ├── moderation.ts       # Ban, takedown
-│   ├── seed.ts             # Dev seeding (AI-generated content)
+│   ├── seed.ts             # Dev seeding (basic AI-generated content)
+│   ├── news-seed.ts        # AI News Seeder (RSS/HN → Claude → posts)
 │   ├── scheduled.ts        # Cron jobs (ranking updates, cleanup)
 │   └── unfurl.ts           # Link preview metadata extraction
 │
 ├── middleware/
-│   ├── auth.ts             # requireAuth, optionalAuth, getJwtSecret
+│   ├── auth.ts             # requireAuth, optionalAuth, requireAdmin
+│   ├── clerk-auth.ts       # Clerk JWT validation middleware
 │   ├── csrf.ts             # Origin validation
 │   └── rate-limit.ts       # KV-based rate limiting
 │
 ├── services/
 │   ├── notifications.ts    # Notification CRUD helpers
 │   ├── kv-client.ts        # KV helper utilities
-│   └── snowflake.ts        # Snowflake ID generation
+│   ├── snowflake.ts        # Snowflake ID generation
+│   ├── news-aggregator.ts  # Fetch AI/ML news from RSS feeds & HN
+│   ├── story-processor.ts  # Claude-powered story analysis
+│   └── conversation-generator.ts  # Generate posts & threads from stories
 │
-├── shared/                  # SSR component renderers (legacy pages)
-│   ├── post-renderer.ts
-│   ├── user-renderer.ts
-│   ├── sidebar-renderer.ts
-│   └── bottom-nav.ts
+├── shared/                  # Shared utilities
+│   ├── index.ts            # Barrel export
+│   ├── utils.ts            # escapeHtml, formatTimeAgo, linkifyMentions
+│   ├── post-renderer.ts    # Post card rendering
+│   ├── sidebar-renderer.ts # Sidebar rendering
+│   └── bottom-nav.ts       # Mobile bottom nav
 │
 ├── types/
 │   ├── env.ts              # Env interface with all bindings
-│   ├── user.ts             # UserProfile, UserSettings
+│   ├── user.ts             # UserProfile, UserSettings, AuthUser
 │   ├── post.ts             # Post, PostMetadata
-│   ├── feed.ts             # FeedEntry
-│   └── notification.ts     # Notification types
+│   ├── feed.ts             # FeedEntry, FanOutMessage
+│   ├── notification.ts     # Notification types
+│   └── news.ts             # NewsItem, ProcessedStory, PersonaProfile
 │
 └── utils/
     ├── batch.ts            # batchKVGet, batchInChunks, sanitizeIds
@@ -201,7 +212,7 @@ src/
     ├── response.ts         # success(), notFound(), serverError()
     ├── safe-parse.ts       # safeJsonParse, safeAtob
     ├── search-index.ts     # Tokenization, indexing
-    └── logger.ts           # Structured logging
+    └── logger.ts           # Structured logging (JSON/pretty modes)
 
 web/                         # React SPA (Vite)
 ├── src/
@@ -215,7 +226,8 @@ web/                         # React SPA (Vite)
 │   ├── lib/
 │   │   ├── api.ts          # API client with typed methods
 │   │   ├── queryClient.ts  # React Query setup
-│   │   └── websocket.ts    # WebSocket connection
+│   │   ├── websocket.ts    # WebSocket connection
+│   │   └── useWebSocket.ts # WebSocket React hook
 │   ├── stores/
 │   │   ├── authStore.ts    # Zustand auth state
 │   │   └── themeStore.ts   # Theme persistence
@@ -410,6 +422,9 @@ All API responses follow this structure:
 
 ### Authentication
 
+The Wire supports two authentication methods:
+
+**1. Legacy JWT (email/password):**
 ```typescript
 // Middleware
 import { requireAuth, optionalAuth } from "../middleware/auth";
@@ -424,6 +439,25 @@ app.get("/api/posts/:id", optionalAuth, async (c) => {
   const userId = c.get("userId"); // May be undefined
 });
 ```
+
+**2. Clerk OAuth (Google/Apple sign-in):**
+```typescript
+// Middleware
+import { clerkAuthMiddleware, requireClerkAuth } from "../middleware/clerk-auth";
+
+// Session check - returns user info or needs_handle status
+app.get("/api/clerk/session", requireClerkAuth, async (c) => {
+  const clerkUserId = c.get("clerkUserId");
+  // Returns { status: "linked", user: {...} } or { status: "needs_handle" }
+});
+
+// Onboarding - creates internal user linked to Clerk
+app.post("/api/clerk/onboarding/complete", requireClerkAuth, async (c) => {
+  // Takes { handle } and creates full user account
+});
+```
+
+**Auto-follow on signup:** All new users automatically follow `FOUNDER_HANDLE` ("chabotc") and receive their recent posts in their initial feed.
 
 ### Handler Response Helpers
 
@@ -603,12 +637,15 @@ npm run deploy             # Deploy to Cloudflare
 | When working on...   | Read these files                                                                      |
 | -------------------- | ------------------------------------------------------------------------------------- |
 | Authentication       | `src/handlers/auth.ts`, `src/middleware/auth.ts`, `src/utils/jwt.ts`                  |
+| Clerk OAuth          | `src/handlers/clerk-auth.ts`, `src/middleware/clerk-auth.ts`                          |
 | Feed algorithm       | `src/handlers/feed.ts`, `src/durable-objects/FeedDO.ts`, `src/constants.ts` (SCORING) |
 | User profiles        | `src/handlers/users.ts`, `src/durable-objects/UserDO.ts`                              |
 | Posts & interactions | `src/handlers/posts.ts`, `src/durable-objects/PostDO.ts`                              |
 | Search               | `src/handlers/search.ts`, `src/utils/search-index.ts`                                 |
 | Notifications        | `src/handlers/notifications.ts`, `src/services/notifications.ts`                      |
 | Batching             | `src/utils/batch.ts`, `src/handlers/batch.ts`                                         |
+| AI News Seeder       | `src/handlers/news-seed.ts`, `src/services/news-aggregator.ts`, `src/services/story-processor.ts`, `src/services/conversation-generator.ts` |
+| Logging              | `src/utils/logger.ts`                                                                 |
 | Frontend state       | `web/src/stores/`, `web/src/lib/api.ts`                                               |
 | UI components        | `web/src/components/`, `AGENTS.md` (design system)                                    |
 
@@ -619,15 +656,45 @@ npm run deploy             # Deploy to Cloudflare
 ```typescript
 // src/constants.ts
 
+// Founder account - all new users auto-follow this account
+FOUNDER_HANDLE = "chabotc";
+
+// System limits
 LIMITS.MAX_FEED_ENTRIES = 1000;
 LIMITS.MAX_NOTE_LENGTH = 280;
 LIMITS.DEFAULT_FEED_PAGE_SIZE = 20;
 LIMITS.MAX_PAGINATION_LIMIT = 50;
+LIMITS.MAX_THREAD_DEPTH = 10;
+LIMITS.MAX_BIO_LENGTH = 160;
+LIMITS.MAX_DISPLAY_NAME_LENGTH = 50;
 
-CACHE_TTL.PROFILE = 3600; // 1 hour
-CACHE_TTL.FOF_RANKINGS = 900; // 15 minutes
+// Cache TTLs (seconds)
+CACHE_TTL.PROFILE = 3600;        // 1 hour
+CACHE_TTL.FOF_RANKINGS = 900;    // 15 minutes
+CACHE_TTL.MEDIA = 31536000;      // 1 year (immutable)
 
-BATCH_SIZE.KV_LIST = 100; // KV list operations
+// Retention periods (milliseconds)
+RETENTION.FEED_ENTRIES = 7 * 24 * 60 * 60 * 1000;     // 7 days
+RETENTION.DELETED_POSTS = 30 * 24 * 60 * 60 * 1000;   // 30 days
+RETENTION.FOF_RANKING_WINDOW = 24 * 60 * 60 * 1000;   // 24 hours
+
+// Scoring parameters (freshness-first approach)
+SCORING.RECENCY_HALF_LIFE_HOURS = 3;
+SCORING.ENGAGEMENT_HALF_LIFE_HOURS = 18;
+SCORING.FRESH_BOOST_OWN = 40;           // Strong boost for user's own posts
+SCORING.FRESH_BOOST_FOLLOW = 20;        // Medium boost for followed users
+SCORING.FRESH_BOOST_EXPLORE = 6;        // Small boost for explore posts
+SCORING.RECENCY_WEIGHT = 50;            // Dominant weight for freshness
+SCORING.ENGAGEMENT_WEIGHT = 5;          // Minor weight for engagement
+SCORING.REPLY_WEIGHT = 4;               // Replies signal discussion
+SCORING.REPOST_WEIGHT = 3;              // Reposts amplify reach
+SCORING.LIKE_WEIGHT = 1;                // Base engagement unit
+SCORING.OWN_POST_PIN_THRESHOLD_MS = 10 * 60 * 1000;   // 10 min pinning
+SCORING.FOLLOW_RATIO_NORMAL = 0.85;     // 85% follow, 15% explore
+SCORING.FOLLOW_RATIO_STALE = 0.6;       // When feed is stale, more explore
+
+BATCH_SIZE.KV_LIST = 100;               // KV list operations
+BATCH_SIZE.QUEUE_BATCH = 100;           // Queue batch size
 ```
 
 ---

@@ -2,7 +2,12 @@
 
 flowchart LR
   subgraph Client["Client"]
-    Browser["Browser UI"]
+    Browser["React SPA<br/>Vite + React Query"]
+  end
+
+  subgraph External["External Services"]
+    Clerk["Clerk<br/>OAuth (Google/Apple)"]
+    Claude["Claude API<br/>AI News Seeder"]
   end
 
   subgraph Edge["Cloudflare Workers"]
@@ -27,6 +32,9 @@ flowchart LR
   end
 
   Browser -->|HTTP/WS| Worker
+  Browser -->|OAuth| Clerk
+  Clerk -->|JWT| Worker
+  Worker -->|story analysis| Claude
   Worker --> UserDO
   Worker --> PostDO
   Worker --> FeedDO

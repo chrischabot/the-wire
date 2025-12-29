@@ -12,7 +12,15 @@ digraph Architecture {
     label="Client";
     color="#E2E8F0";
     style="rounded";
-    Browser [label="Browser UI"];
+    Browser [label="React SPA\nVite + React Query"];
+  }
+
+  subgraph cluster_external {
+    label="External Services";
+    color="#E2E8F0";
+    style="rounded";
+    Clerk [label="Clerk\nOAuth (Google/Apple)"];
+    Claude [label="Claude API\nAI News Seeder"];
   }
 
   subgraph cluster_edge {
@@ -49,6 +57,9 @@ digraph Architecture {
   }
 
   Browser -> Worker [label="HTTP/WS"];
+  Browser -> Clerk [label="OAuth"];
+  Clerk -> Worker [label="JWT"];
+  Worker -> Claude [label="story analysis"];
   Worker -> UserDO;
   Worker -> PostDO;
   Worker -> FeedDO;

@@ -28,16 +28,20 @@ The Wire serves as a reference implementation for building stateful, globally di
 The Wire replicates the core Twitter experience:
 
 **Identity and Social Graph**
-- Email and password authentication with JWT tokens validated at the edge
+
+- Dual authentication: Clerk OAuth (Google/Apple) and legacy email/password with JWT
+- Auto-follow founder account on signup for initial content
 - User profiles with avatars, bios, and follower counts
 - Follow, unfollow, and block relationships stored in per-user Durable Objects
 
 **Content**
+
 - 280-character posts with support for images and videos
 - Replies, likes, reposts, and quote posts
 - Snowflake IDs for chronologically sortable, globally unique identifiers
 
 **Feed**
+
 - Personalized home timeline built from posts by accounts you follow
 - Friends-of-friends discovery using a Hacker News-style ranking algorithm
 - Ranked + diversified home feed (recency, engagement, author caps) with explore blend
@@ -45,10 +49,12 @@ The Wire replicates the core Twitter experience:
 - Cursor-based pagination with blocked user and muted word filtering
 
 **Real-time**
+
 - WebSocket connections for live notification delivery
 - Instant updates when someone likes, reposts, or mentions you
 
 **Moderation**
+
 - Admin roles with the ability to ban users and take down posts
 - Per-user block lists and muted words with duration and follow-scoped rules
 
@@ -58,20 +64,24 @@ The Wire replicates the core Twitter experience:
 - **Framework**: Hono (lightweight, fast, edge-optimized)
 - **Storage**: Cloudflare KV (global key-value), R2 (object storage), Durable Objects (stateful coordination)
 - **Queues**: Cloudflare Queues for async fan-out processing
-- **Frontend**: Vanilla JavaScript with shadcn/ui-inspired theming, Lucide icons
+- **AI Services**: Claude API for news processing and conversation generation
+- **Auth**: Clerk (Google/Apple OAuth) + Legacy JWT (email/password)
+- **Frontend**: React SPA with Vite, React Query, Zustand, shadcn/ui-inspired theming, Lucide icons
 
 ## Architecture
 
 The Wire distributes state and compute across Cloudflare's primitives:
 
-| Component | Role |
-|-----------|------|
-| **Workers** | HTTP routing via Hono, middleware chain, business logic |
+| Component           | Role                                                                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Workers**         | HTTP routing via Hono, middleware chain, business logic                                                                                       |
 | **Durable Objects** | UserDO for profiles and social graph, PostDO for interaction counts, FeedDO for personalized timelines, WebSocketDO for real-time connections |
-| **KV** | Authentication cache, post metadata, session storage, feed rankings |
-| **R2** | Image and video storage with magic byte validation |
-| **Queues** | Fanout queue for distributing posts to follower feeds |
-| **Cron Triggers** | Scheduled jobs for ranking updates (15 min), feed cleanup (hourly), and KV compaction (daily) |
+| **KV**              | Authentication cache, post metadata, session storage, feed rankings                                                                           |
+| **R2**              | Image and video storage with magic byte validation                                                                                            |
+| **Queues**          | Fanout queue for distributing posts to follower feeds                                                                                         |
+| **Cron Triggers**   | Scheduled jobs for ranking updates (15 min), feed cleanup (hourly), and KV compaction (daily)                                                 |
+| **Claude API**      | AI News Seeder: story analysis, persona-based conversation generation                                                                         |
+| **Clerk**           | OAuth authentication (Google/Apple sign-in), user onboarding                                                                                  |
 
 The Durable Object model is central to how The Wire achieves consistency at scale. Each user has their own UserDO instance that acts as the single source of truth for their profile, settings, and social connections. When you follow someone, both your UserDO and their UserDO update transactionally. When you post, the message fans out through a queue to the FeedDO instances of each follower. This architecture means that read operations almost always hit local state while writes coordinate only where necessary.
 
@@ -197,6 +207,7 @@ wrangler deploy
 ```
 
 The deployment will:
+
 1. Bundle your TypeScript code
 2. Upload to Cloudflare's global network
 3. Configure all bindings (KV, R2, DOs, Queues)
@@ -213,12 +224,12 @@ wrangler domains add the-wire.com
 
 Environment variables in `wrangler.toml`:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JWT_EXPIRY_HOURS` | 24 | Token lifetime |
-| `MAX_NOTE_LENGTH` | 280 | Character limit for posts |
-| `FEED_PAGE_SIZE` | 20 | Posts per page |
-| `INITIAL_ADMIN_HANDLE` | - | Handle to grant admin privileges on first login |
+| Variable               | Default | Description                                     |
+| ---------------------- | ------- | ----------------------------------------------- |
+| `JWT_EXPIRY_HOURS`     | 24      | Token lifetime                                  |
+| `MAX_NOTE_LENGTH`      | 280     | Character limit for posts                       |
+| `FEED_PAGE_SIZE`       | 20      | Posts per page                                  |
+| `INITIAL_ADMIN_HANDLE` | -       | Handle to grant admin privileges on first login |
 
 ## Geographic Distribution & Scalability
 
@@ -253,13 +264,13 @@ Environment variables in `wrangler.toml`:
 
 ### Scalability Characteristics
 
-| Metric | Capacity | Notes |
-|--------|----------|-------|
-| **Concurrent Users** | Unlimited | Auto-scales with traffic |
-| **Requests/Second** | 10M+ | Per Cloudflare limits |
-| **Geographic Latency** | <50ms | P50 to nearest PoP |
-| **Storage** | Unlimited | KV + R2 scale infinitely |
-| **WebSocket Connections** | 1M+ per DO | Distributed across DOs |
+| Metric                    | Capacity   | Notes                    |
+| ------------------------- | ---------- | ------------------------ |
+| **Concurrent Users**      | Unlimited  | Auto-scales with traffic |
+| **Requests/Second**       | 10M+       | Per Cloudflare limits    |
+| **Geographic Latency**    | <50ms      | P50 to nearest PoP       |
+| **Storage**               | Unlimited  | KV + R2 scale infinitely |
+| **WebSocket Connections** | 1M+ per DO | Distributed across DOs   |
 
 ### Cost Efficiency
 
@@ -309,12 +320,26 @@ See inline code documentation for complete API reference.
 
 ## Feed Algorithm
 
-The Wire uses a sophisticated feed algorithm:
+The Wire uses a freshness-first feed algorithm with configurable scoring parameters:
 
-1. **Round-Robin Merge**: 2 posts from followed users + 1 friends-of-friends post
-2. **FoF Ranking**: Hacker News-style scoring based on engagement and time decay
-3. **Filtering**: Respects blocked users and muted keywords
-4. **Real-Time Updates**: New posts appear instantly via WebSocket
+**Home Feed Composition**
+
+1. Blend followed posts (85%) with explore-ranked posts (15%), adjusting to 60/40 when feed is stale
+2. Apply freshness boosts: own posts (+40), followed users (+20), explore (+6)
+3. Score with exponential decay: recency (3hr half-life), engagement (18hr half-life)
+4. Cap author frequency to prevent feed domination (windowed diversity)
+5. Backfill from underrepresented followees
+
+**Engagement Scoring**
+
+- Replies weight: 4x (signals discussion)
+- Reposts weight: 3x (amplifies reach)
+- Likes weight: 1x (base unit)
+- Recency dominates (50 weight) vs engagement (5 weight)
+
+**Explore Page**: HN-style ranking with gentler decay (1.3 exponent), updated every 15 minutes via cron.
+
+**Real-Time**: New posts appear instantly via WebSocket; blocked users and muted keywords filtered.
 
 ## Security Model
 
@@ -347,17 +372,34 @@ The test suite uses Vitest with Cloudflare's worker pool for realistic edge exec
 
 ```
 src/
-├── index.ts              # Worker entry, routes, middleware
+├── index.ts              # Worker entry, routes, middleware, queue consumer
+├── constants.ts          # LIMITS, SCORING, CACHE_TTL, RETENTION, BATCH_SIZE
 ├── durable-objects/      # UserDO, PostDO, FeedDO, WebSocketDO
-├── handlers/             # Route handlers by domain
-├── middleware/           # Rate limiting, CSRF
-├── services/             # Notifications, snowflake IDs
-├── types/                # TypeScript interfaces
-└── utils/                # Validation, JWT, crypto
-public/
-├── home.html             # Main application shell
-├── css/                  # Styles with theme variants
-└── js/                   # Client-side logic
+├── handlers/
+│   ├── auth.ts           # Legacy JWT auth (signup, login, password reset)
+│   ├── clerk-auth.ts     # Clerk OAuth integration (Google/Apple)
+│   ├── feed.ts           # Home feed, explore with ranking
+│   ├── news-seed.ts      # AI News Seeder endpoints
+│   └── ...               # posts, users, search, media, admin, etc.
+├── middleware/
+│   ├── auth.ts           # JWT validation (requireAuth, optionalAuth)
+│   ├── clerk-auth.ts     # Clerk JWT validation
+│   └── ...               # csrf, rate-limit
+├── services/
+│   ├── news-aggregator.ts      # Fetch AI/ML news from RSS & HN
+│   ├── story-processor.ts      # Claude-powered story analysis
+│   ├── conversation-generator.ts # Generate posts & threads
+│   └── ...               # notifications, snowflake, kv-client
+├── types/                # TypeScript interfaces (user, post, feed, news)
+└── utils/                # validation, jwt, crypto, batch, logger, response
+web/                      # React SPA (Vite)
+├── src/
+│   ├── components/       # layout/, posts/, users/
+│   ├── pages/            # HomePage, ExplorePage, ProfilePage, etc.
+│   ├── lib/              # api.ts, queryClient.ts, websocket.ts
+│   ├── stores/           # authStore.ts, themeStore.ts (Zustand)
+│   └── App.tsx           # Router setup
+└── index.html
 ```
 
 ## Production Monitoring
