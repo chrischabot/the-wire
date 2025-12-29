@@ -25,6 +25,15 @@ export const LIMITS = {
 
   /** Default feed page size */
   DEFAULT_FEED_PAGE_SIZE: 20,
+
+  /** Maximum moderation reason length */
+  MAX_MODERATION_REASON_LENGTH: 500,
+
+  /** Maximum bio length */
+  MAX_BIO_LENGTH: 160,
+
+  /** Maximum display name length */
+  MAX_DISPLAY_NAME_LENGTH: 50,
 } as const;
 
 /**

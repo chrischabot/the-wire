@@ -11,6 +11,7 @@ import { requireAuth } from "../middleware/auth";
 import { BATCH_SIZE } from "../constants";
 import { batchKVGet } from "../utils/batch";
 import { safeJsonParse } from "../utils/safe-parse";
+import { logger } from "../utils/logger";
 
 type HonoContext = Context<{ Bindings: Env }>;
 
@@ -45,7 +46,7 @@ async function requireAdmin(
 
     await next();
   } catch (error) {
-    console.error("Error checking admin status:", error);
+    logger.error("Error checking admin status", error, { userId });
     return c.json(
       { success: false, error: "Error verifying admin status" },
       500,
@@ -155,7 +156,7 @@ admin.get("/stats", requireAuth, requireAdmin, async (c) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching admin stats:", error);
+    logger.error("Error fetching admin stats", error);
     return c.json({ success: false, error: "Error fetching statistics" }, 500);
   }
 });
@@ -228,7 +229,7 @@ admin.get("/users", requireAuth, requireAdmin, async (c) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching users:", error);
+    logger.error("Error fetching users", error);
     return c.json({ success: false, error: "Error fetching users" }, 500);
   }
 });
@@ -277,7 +278,7 @@ admin.get("/users/:handle", requireAuth, requireAdmin, async (c) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching user:", error);
+    logger.error("Error fetching user", error);
     return c.json({ success: false, error: "Error fetching user" }, 500);
   }
 });
@@ -338,7 +339,7 @@ admin.put("/users/:handle", requireAuth, requireAdmin, async (c) => {
       data: { message: `User @${handle} updated successfully` },
     });
   } catch (error) {
-    console.error("Error updating user:", error);
+    logger.error("Error updating user", error);
     return c.json({ success: false, error: "Error updating user" }, 500);
   }
 });
@@ -390,7 +391,7 @@ admin.delete("/users/:handle", requireAuth, requireAdmin, async (c) => {
       data: { message: `User @${handle} has been deleted` },
     });
   } catch (error) {
-    console.error("Error deleting user:", error);
+    logger.error("Error deleting user", error);
     return c.json({ success: false, error: "Error deleting user" }, 500);
   }
 });
@@ -452,7 +453,7 @@ admin.get("/posts", requireAuth, requireAdmin, async (c) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching posts:", error);
+    logger.error("Error fetching posts", error);
     return c.json({ success: false, error: "Error fetching posts" }, 500);
   }
 });
@@ -476,7 +477,7 @@ admin.get("/posts/:id", requireAuth, requireAdmin, async (c) => {
       data: post,
     });
   } catch (error) {
-    console.error("Error fetching post:", error);
+    logger.error("Error fetching post", error);
     return c.json({ success: false, error: "Error fetching post" }, 500);
   }
 });
@@ -512,7 +513,7 @@ admin.post("/posts/:id/restore", requireAuth, requireAdmin, async (c) => {
       data: { message: "Post has been restored" },
     });
   } catch (error) {
-    console.error("Error restoring post:", error);
+    logger.error("Error restoring post", error);
     return c.json({ success: false, error: "Error restoring post" }, 500);
   }
 });
@@ -537,7 +538,7 @@ admin.delete("/posts/:id", requireAuth, requireAdmin, async (c) => {
       data: { message: "Post has been permanently deleted" },
     });
   } catch (error) {
-    console.error("Error deleting post:", error);
+    logger.error("Error deleting post", error);
     return c.json({ success: false, error: "Error deleting post" }, 500);
   }
 });
@@ -546,135 +547,125 @@ admin.delete("/posts/:id", requireAuth, requireAdmin, async (c) => {
  * POST /api/admin/repair/refresh-explore - Manually refresh the explore feed rankings
  * Optimized to avoid subrequest limits by using batched KV gets
  */
-admin.post(
-  "/repair/refresh-explore",
-  requireAuth,
-  requireAdmin,
-  async (c) => {
-    try {
-      // First, list all post keys
-      const allKeys: string[] = [];
-      let cursor: string | undefined;
-      const maxBatches = 20;
-      let batchCount = 0;
+admin.post("/repair/refresh-explore", requireAuth, requireAdmin, async (c) => {
+  try {
+    // First, list all post keys
+    const allKeys: string[] = [];
+    let cursor: string | undefined;
+    const maxBatches = 20;
+    let batchCount = 0;
 
-      while (batchCount < maxBatches) {
-        const listResult = await c.env.POSTS_KV.list({
-          prefix: "post:",
-          limit: BATCH_SIZE.KV_LIST,
-          cursor: cursor ?? null,
-        });
-        batchCount++;
-        allKeys.push(...listResult.keys.map((k) => k.name));
-
-        if (listResult.list_complete) break;
-        cursor = listResult.cursor;
-      }
-
-      // Batch fetch all posts using our optimized batchKVGet
-      const postMap = await batchKVGet<PostMetadata>(
-        c.env,
-        allKeys,
-        "POSTS_KV",
-        {
-          parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null),
-        },
-      );
-
-      const scoredPosts: Array<{
-        post: PostMetadata;
-        score: number;
-        authorId: string;
-      }> = [];
-      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const LN2 = Math.log(2);
-
-      for (const [, post] of postMap) {
-        if (!post) continue;
-        if (post.isDeleted || post.isTakenDown) continue;
-        // Only include posts from last 7 days
-        if (post.createdAt < sevenDaysAgo) continue;
-
-        const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
-        const recency = Math.exp((-LN2 * ageHours) / 12); // 12 hour half-life
-        const engagement =
-          (post.likeCount || 0) * 2 +
-          (post.replyCount || 0) * 3 +
-          (post.repostCount || 0) * 2;
-        const engScore = Math.log1p(engagement);
-        const engDecay = Math.exp((-LN2 * ageHours) / 24); // 24 hour half-life
-        const score = 50 * recency + 30 * engScore * engDecay;
-
-        scoredPosts.push({ post, score, authorId: post.authorId });
-      }
-
-      // Sort by score descending
-      scoredPosts.sort((a, b) => b.score - a.score);
-
-      // Apply author diversity: max 2 posts per author in any 5-post window
-      const diversePosts: typeof scoredPosts = [];
-      const pending = [...scoredPosts];
-      const windowSize = 5;
-      const maxPerAuthorInWindow = 2;
-
-      while (pending.length > 0 && diversePosts.length < 200) {
-        let added = false;
-
-        for (let i = 0; i < pending.length; i++) {
-          const postItem = pending[i]!;
-
-          const windowStart = Math.max(0, diversePosts.length - windowSize + 1);
-          const window = diversePosts.slice(windowStart);
-          const authorCountInWindow = window.filter(
-            (p) => p.authorId === postItem.authorId,
-          ).length;
-
-          if (authorCountInWindow < maxPerAuthorInWindow) {
-            diversePosts.push(postItem);
-            pending.splice(i, 1);
-            added = true;
-            break;
-          }
-        }
-
-        if (!added && pending.length > 0) {
-          diversePosts.push(pending.shift()!);
-        }
-      }
-
-      // Store in KV - full post data for instant loading
-      const cacheData = diversePosts.map((p) => p.post);
-      await c.env.FEEDS_KV.put("explore:ranked", JSON.stringify(cacheData), {
-        expirationTtl: 900, // 15 minutes
+    while (batchCount < maxBatches) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: "post:",
+        limit: BATCH_SIZE.KV_LIST,
+        cursor: cursor ?? null,
       });
+      batchCount++;
+      allKeys.push(...listResult.keys.map((k) => k.name));
 
-      return c.json({
-        success: true,
-        data: {
-          message: "Explore feed refreshed",
-          totalPostsScanned: allKeys.length,
-          postsInTimeRange: scoredPosts.length,
-          postsInFeed: cacheData.length,
-          topPosts: cacheData.slice(0, 5).map((p) => ({
-            id: p.id,
-            authorHandle: p.authorHandle,
-            content: p.content?.substring(0, 50),
-            createdAt: new Date(p.createdAt).toISOString(),
-          })),
-        },
-      });
-    } catch (error) {
-      console.error("Error refreshing explore:", error);
-      return c.json(
-        {
-          success: false,
-          error: `Error refreshing explore feed: ${error instanceof Error ? error.message : "Unknown error"}`,
-        },
-        500,
-      );
+      if (listResult.list_complete) break;
+      cursor = listResult.cursor;
     }
-  },
-);
+
+    // Batch fetch all posts using our optimized batchKVGet
+    const postMap = await batchKVGet<PostMetadata>(c.env, allKeys, "POSTS_KV", {
+      parse: (val) => (val ? safeJsonParse<PostMetadata>(val) : null),
+    });
+
+    const scoredPosts: Array<{
+      post: PostMetadata;
+      score: number;
+      authorId: string;
+    }> = [];
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const LN2 = Math.log(2);
+
+    for (const [, post] of postMap) {
+      if (!post) continue;
+      if (post.isDeleted || post.isTakenDown) continue;
+      // Only include posts from last 7 days
+      if (post.createdAt < sevenDaysAgo) continue;
+
+      const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
+      const recency = Math.exp((-LN2 * ageHours) / 12); // 12 hour half-life
+      const engagement =
+        (post.likeCount || 0) * 2 +
+        (post.replyCount || 0) * 3 +
+        (post.repostCount || 0) * 2;
+      const engScore = Math.log1p(engagement);
+      const engDecay = Math.exp((-LN2 * ageHours) / 24); // 24 hour half-life
+      const score = 50 * recency + 30 * engScore * engDecay;
+
+      scoredPosts.push({ post, score, authorId: post.authorId });
+    }
+
+    // Sort by score descending
+    scoredPosts.sort((a, b) => b.score - a.score);
+
+    // Apply author diversity: max 2 posts per author in any 5-post window
+    const diversePosts: typeof scoredPosts = [];
+    const pending = [...scoredPosts];
+    const windowSize = 5;
+    const maxPerAuthorInWindow = 2;
+
+    while (pending.length > 0 && diversePosts.length < 200) {
+      let added = false;
+
+      for (let i = 0; i < pending.length; i++) {
+        const postItem = pending[i]!;
+
+        const windowStart = Math.max(0, diversePosts.length - windowSize + 1);
+        const window = diversePosts.slice(windowStart);
+        const authorCountInWindow = window.filter(
+          (p) => p.authorId === postItem.authorId,
+        ).length;
+
+        if (authorCountInWindow < maxPerAuthorInWindow) {
+          diversePosts.push(postItem);
+          pending.splice(i, 1);
+          added = true;
+          break;
+        }
+      }
+
+      if (!added && pending.length > 0) {
+        diversePosts.push(pending.shift()!);
+      }
+    }
+
+    // Store in KV - full post data for instant loading
+    const cacheData = diversePosts.map((p) => p.post);
+    await c.env.FEEDS_KV.put("explore:ranked", JSON.stringify(cacheData), {
+      expirationTtl: 900, // 15 minutes
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        message: "Explore feed refreshed",
+        totalPostsScanned: allKeys.length,
+        postsInTimeRange: scoredPosts.length,
+        postsInFeed: cacheData.length,
+        topPosts: cacheData.slice(0, 5).map((p) => ({
+          id: p.id,
+          authorHandle: p.authorHandle,
+          content: p.content?.substring(0, 50),
+          createdAt: new Date(p.createdAt).toISOString(),
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error("Error refreshing explore", error);
+    return c.json(
+      {
+        success: false,
+        error: `Error refreshing explore feed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      },
+      500,
+    );
+  }
+});
 
 /**
  * POST /api/admin/repair/user/:handle/clean-nulls - Remove null entries from following/followers arrays
@@ -740,7 +731,7 @@ admin.post(
         },
       });
     } catch (error) {
-      console.error("Error cleaning nulls:", error);
+      logger.error("Error cleaning nulls", error);
       return c.json({ success: false, error: "Error cleaning nulls" }, 500);
     }
   },
@@ -750,93 +741,85 @@ admin.post(
  * POST /api/admin/repair/rebuild-user-kv - Rebuild user:{id} KV entries for all users
  * This fixes the issue where seeded users might not have user:{id} entries
  */
-admin.post(
-  "/repair/rebuild-user-kv",
-  requireAuth,
-  requireAdmin,
-  async (c) => {
-    try {
-      // Get all handle:{handle} entries
-      const handleKeys: string[] = [];
-      let handleCursor: string | undefined;
-      do {
-        const handleList = await c.env.USERS_KV.list({
-          prefix: "handle:",
-          limit: BATCH_SIZE.KV_LIST,
-          cursor: handleCursor ?? null,
-        });
-        handleKeys.push(...handleList.keys.map((k) => k.name));
-        handleCursor = handleList.list_complete ? undefined : handleList.cursor;
-      } while (handleCursor);
-
-      const results: Array<{
-        handle: string;
-        userId: string;
-        hadUserEntry: boolean;
-        created: boolean;
-      }> = [];
-
-      for (const handleKey of handleKeys) {
-        const handle = handleKey.replace("handle:", "");
-        const userId = await c.env.USERS_KV.get(handleKey);
-
-        if (!userId) continue;
-
-        // Check if user:{id} entry exists
-        const userEntry = await c.env.USERS_KV.get(`user:${userId}`);
-
-        if (!userEntry) {
-          // Create user:{id} entry with minimal data
-          // We need to get the handle and email from other sources
-          const profileData = await c.env.USERS_KV.get(`profile:${handle}`);
-          if (profileData) {
-            const profile = safeJsonParse<UserProfile>(profileData);
-            if (profile) {
-              const authUser = {
-                id: userId,
-                email: `${handle}@seeded.example`, // Placeholder email for seeded users
-                handle: handle,
-                passwordHash: "", // No password for seeded users
-                salt: "",
-                createdAt: profile.joinedAt || Date.now(),
-              };
-              await c.env.USERS_KV.put(
-                `user:${userId}`,
-                JSON.stringify(authUser),
-              );
-              results.push({
-                handle,
-                userId,
-                hadUserEntry: false,
-                created: true,
-              });
-            }
-          }
-        } else {
-          results.push({ handle, userId, hadUserEntry: true, created: false });
-        }
-      }
-
-      const createdCount = results.filter((r) => r.created).length;
-
-      return c.json({
-        success: true,
-        data: {
-          message: `Rebuilt user KV entries`,
-          totalUsers: results.length,
-          createdEntries: createdCount,
-          results,
-        },
+admin.post("/repair/rebuild-user-kv", requireAuth, requireAdmin, async (c) => {
+  try {
+    // Get all handle:{handle} entries
+    const handleKeys: string[] = [];
+    let handleCursor: string | undefined;
+    do {
+      const handleList = await c.env.USERS_KV.list({
+        prefix: "handle:",
+        limit: BATCH_SIZE.KV_LIST,
+        cursor: handleCursor ?? null,
       });
-    } catch (error) {
-      console.error("Error rebuilding user KV:", error);
-      return c.json(
-        { success: false, error: "Error rebuilding user KV" },
-        500,
-      );
+      handleKeys.push(...handleList.keys.map((k) => k.name));
+      handleCursor = handleList.list_complete ? undefined : handleList.cursor;
+    } while (handleCursor);
+
+    const results: Array<{
+      handle: string;
+      userId: string;
+      hadUserEntry: boolean;
+      created: boolean;
+    }> = [];
+
+    for (const handleKey of handleKeys) {
+      const handle = handleKey.replace("handle:", "");
+      const userId = await c.env.USERS_KV.get(handleKey);
+
+      if (!userId) continue;
+
+      // Check if user:{id} entry exists
+      const userEntry = await c.env.USERS_KV.get(`user:${userId}`);
+
+      if (!userEntry) {
+        // Create user:{id} entry with minimal data
+        // We need to get the handle and email from other sources
+        const profileData = await c.env.USERS_KV.get(`profile:${handle}`);
+        if (profileData) {
+          const profile = safeJsonParse<UserProfile>(profileData);
+          if (profile) {
+            const authUser = {
+              id: userId,
+              email: `${handle}@seeded.example`, // Placeholder email for seeded users
+              handle: handle,
+              passwordHash: "", // No password for seeded users
+              salt: "",
+              createdAt: profile.joinedAt || Date.now(),
+            };
+            await c.env.USERS_KV.put(
+              `user:${userId}`,
+              JSON.stringify(authUser),
+            );
+            results.push({
+              handle,
+              userId,
+              hadUserEntry: false,
+              created: true,
+            });
+          }
+        }
+      } else {
+        results.push({ handle, userId, hadUserEntry: true, created: false });
+      }
     }
-  },
-);
+
+    const createdCount = results.filter((r) => r.created).length;
+
+    return c.json({
+      success: true,
+      data: {
+        message: `Rebuilt user KV entries`,
+        totalUsers: results.length,
+        createdEntries: createdCount,
+        results,
+      },
+    });
+  } catch (error) {
+    logger.error("Error rebuilding user KV", error);
+    return c.json({ success: false, error: "Error rebuilding user KV" }, 500);
+  }
+});
 
 /**
  * POST /api/admin/repair/rebuild-profile-cache - Rebuild profile:{handle} KV entries from DOs
@@ -892,14 +875,15 @@ admin.post(
 
           results.push({ handle, hadCachedProfile, cached: true });
         } catch (err) {
-          console.error(`Error caching profile for ${handle}:`, err);
+          logger.error("Error caching profile", err, { handle });
           results.push({ handle, hadCachedProfile, cached: false });
         }
       }
 
       const cachedCount = results.filter((r) => r.cached).length;
-      const alreadyCachedCount = results.filter((r) => r.hadCachedProfile)
-        .length;
+      const alreadyCachedCount = results.filter(
+        (r) => r.hadCachedProfile,
+      ).length;
 
       return c.json({
         success: true,
@@ -912,7 +896,7 @@ admin.post(
         },
       });
     } catch (error) {
-      console.error("Error rebuilding profile cache:", error);
+      logger.error("Error rebuilding profile cache", error);
       return c.json(
         { success: false, error: "Error rebuilding profile cache" },
         500,
@@ -924,100 +908,92 @@ admin.post(
 /**
  * GET /api/admin/debug/following/:handle - Debug following resolution
  */
-admin.get(
-  "/debug/following/:handle",
-  requireAuth,
-  requireAdmin,
-  async (c) => {
-    const handle = c.req.param("handle").toLowerCase();
+admin.get("/debug/following/:handle", requireAuth, requireAdmin, async (c) => {
+  const handle = c.req.param("handle").toLowerCase();
 
-    try {
-      const userId = await c.env.USERS_KV.get(`handle:${handle}`);
-      if (!userId) {
-        return c.json({ success: false, error: "User not found" }, 404);
-      }
-
-      const doId = c.env.USER_DO.idFromName(userId);
-      const stub = c.env.USER_DO.get(doId);
-
-      const followingResp = await stub.fetch("https://do.internal/following");
-      const { following } = (await followingResp.json()) as {
-        following: string[];
-      };
-
-      // Step 1: Get user entries
-      const userKeys = following.map((id) => `user:${id}`);
-      const userMap = await batchKVGet(c.env, userKeys, "USERS_KV", {
-        parse: (val) =>
-          val
-            ? safeJsonParse<{ id: string; handle: string; email: string }>(val)
-            : null,
-      });
-
-      // Step 2: Extract handles
-      const handlesToFetch: string[] = [];
-      const idToHandle = new Map<string, string>();
-      const userLookupResults: Array<{
-        userId: string;
-        foundUser: boolean;
-        handle: string | null;
-      }> = [];
-
-      for (const followingId of following) {
-        const authUser = userMap.get(`user:${followingId}`);
-        userLookupResults.push({
-          userId: followingId,
-          foundUser: !!authUser,
-          handle: authUser?.handle || null,
-        });
-        if (authUser?.handle) {
-          handlesToFetch.push(authUser.handle);
-          idToHandle.set(followingId, authUser.handle);
-        }
-      }
-
-      // Step 3: Get profiles
-      const profileKeys = handlesToFetch.map((h) => `profile:${h}`);
-      const profileMap = await batchKVGet<UserProfile>(
-        c.env,
-        profileKeys,
-        "USERS_KV",
-        {
-          parse: (val) => (val ? safeJsonParse<UserProfile>(val) : null),
-        },
-      );
-
-      const profileLookupResults: Array<{
-        handle: string;
-        foundProfile: boolean;
-      }> = [];
-      for (const h of handlesToFetch) {
-        profileLookupResults.push({
-          handle: h,
-          foundProfile: !!profileMap.get(`profile:${h}`),
-        });
-      }
-
-      return c.json({
-        success: true,
-        data: {
-          followingCount: following.length,
-          userLookupResults,
-          handlesFound: handlesToFetch.length,
-          profileLookupResults,
-          profilesFound: profileLookupResults.filter((r) => r.foundProfile)
-            .length,
-        },
-      });
-    } catch (error) {
-      console.error("Error debugging following:", error);
-      return c.json(
-        { success: false, error: "Error debugging following" },
-        500,
-      );
+  try {
+    const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+    if (!userId) {
+      return c.json({ success: false, error: "User not found" }, 404);
     }
-  },
-);
+
+    const doId = c.env.USER_DO.idFromName(userId);
+    const stub = c.env.USER_DO.get(doId);
+
+    const followingResp = await stub.fetch("https://do.internal/following");
+    const { following } = (await followingResp.json()) as {
+      following: string[];
+    };
+
+    // Step 1: Get user entries
+    const userKeys = following.map((id) => `user:${id}`);
+    const userMap = await batchKVGet(c.env, userKeys, "USERS_KV", {
+      parse: (val) =>
+        val
+          ? safeJsonParse<{ id: string; handle: string; email: string }>(val)
+          : null,
+    });
+
+    // Step 2: Extract handles
+    const handlesToFetch: string[] = [];
+    const idToHandle = new Map<string, string>();
+    const userLookupResults: Array<{
+      userId: string;
+      foundUser: boolean;
+      handle: string | null;
+    }> = [];
+
+    for (const followingId of following) {
+      const authUser = userMap.get(`user:${followingId}`);
+      userLookupResults.push({
+        userId: followingId,
+        foundUser: !!authUser,
+        handle: authUser?.handle || null,
+      });
+      if (authUser?.handle) {
+        handlesToFetch.push(authUser.handle);
+        idToHandle.set(followingId, authUser.handle);
+      }
+    }
+
+    // Step 3: Get profiles
+    const profileKeys = handlesToFetch.map((h) => `profile:${h}`);
+    const profileMap = await batchKVGet<UserProfile>(
+      c.env,
+      profileKeys,
+      "USERS_KV",
+      {
+        parse: (val) => (val ? safeJsonParse<UserProfile>(val) : null),
+      },
+    );
+
+    const profileLookupResults: Array<{
+      handle: string;
+      foundProfile: boolean;
+    }> = [];
+    for (const h of handlesToFetch) {
+      profileLookupResults.push({
+        handle: h,
+        foundProfile: !!profileMap.get(`profile:${h}`),
+      });
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        followingCount: following.length,
+        userLookupResults,
+        handlesFound: handlesToFetch.length,
+        profileLookupResults,
+        profilesFound: profileLookupResults.filter((r) => r.foundProfile)
+          .length,
+      },
+    });
+  } catch (error) {
+    logger.error("Error debugging following", error);
+    return c.json({ success: false, error: "Error debugging following" }, 500);
+  }
+});
 
 /**
  * GET /api/admin/debug/user/:handle - Debug user's DO state
@@ -1083,7 +1059,7 @@ admin.get("/debug/user/:handle", requireAuth, requireAdmin, async (c) => {
       },
     });
   } catch (error) {
-    console.error("Error debugging user:", error);
+    logger.error("Error debugging user", error);
     return c.json({ success: false, error: "Error debugging user" }, 500);
   }
 });
@@ -1151,7 +1127,7 @@ admin.post(
             foundFollowing.push(userId);
           }
         } catch (err) {
-          console.error(`Error checking user ${userId}:`, err);
+          logger.error("Error checking user", err, { userId });
         }
       }
 
@@ -1212,7 +1188,7 @@ admin.post(
         },
       });
     } catch (error) {
-      console.error("Error rebuilding social graph:", error);
+      logger.error("Error rebuilding social graph", error);
       return c.json(
         { success: false, error: "Error rebuilding social graph" },
         500,
@@ -1260,7 +1236,7 @@ admin.post(
         },
       });
     } catch (error) {
-      console.error("Error syncing counts:", error);
+      logger.error("Error syncing counts", error);
       return c.json({ success: false, error: "Error syncing counts" }, 500);
     }
   },
@@ -1269,97 +1245,90 @@ admin.post(
 /**
  * GET /api/admin/debug/all-users-social - Get social graph for all users
  */
-admin.get(
-  "/debug/all-users-social",
-  requireAuth,
-  requireAdmin,
-  async (c) => {
-    try {
-      // Get all user IDs
-      const userKeys: string[] = [];
-      let userCursor: string | undefined;
-      do {
-        const userList = await c.env.USERS_KV.list({
-          prefix: "user:",
-          limit: BATCH_SIZE.KV_LIST,
-          cursor: userCursor ?? null,
-        });
-        userKeys.push(...userList.keys.map((k) => k.name));
-        userCursor = userList.list_complete ? undefined : userList.cursor;
-      } while (userCursor);
-
-      const userDataMap = await batchKVGet(c.env, userKeys, "USERS_KV");
-
-      const usersWithSocial: Array<{
-        userId: string;
-        handle: string;
-        followingCount: number;
-        followerCount: number;
-        actualFollowing: number;
-        actualFollowers: number;
-        following: string[];
-        followers: string[];
-      }> = [];
-
-      for (const [key, data] of userDataMap) {
-        const userId = key.replace("user:", "");
-        const user = safeJsonParse<{ handle: string }>(data);
-        if (!user?.handle) continue;
-
-        try {
-          const doId = c.env.USER_DO.idFromName(userId);
-          const stub = c.env.USER_DO.get(doId);
-
-          const [profileResp, followingResp, followersResp] = await Promise.all(
-            [
-              stub.fetch("https://do.internal/profile"),
-              stub.fetch("https://do.internal/following"),
-              stub.fetch("https://do.internal/followers"),
-            ],
-          );
-
-          const profile = (await profileResp.json()) as {
-            followingCount?: number;
-            followerCount?: number;
-          };
-          const { following } = (await followingResp.json()) as {
-            following: string[];
-          };
-          const { followers } = (await followersResp.json()) as {
-            followers: string[];
-          };
-
-          usersWithSocial.push({
-            userId,
-            handle: user.handle,
-            followingCount: profile.followingCount || 0,
-            followerCount: profile.followerCount || 0,
-            actualFollowing: following?.length || 0,
-            actualFollowers: followers?.length || 0,
-            following: following || [],
-            followers: followers || [],
-          });
-        } catch (err) {
-          console.error(`Error fetching social for ${user.handle}:`, err);
-        }
-      }
-
-      return c.json({
-        success: true,
-        data: {
-          users: usersWithSocial,
-          totalUsers: usersWithSocial.length,
-        },
+admin.get("/debug/all-users-social", requireAuth, requireAdmin, async (c) => {
+  try {
+    // Get all user IDs
+    const userKeys: string[] = [];
+    let userCursor: string | undefined;
+    do {
+      const userList = await c.env.USERS_KV.list({
+        prefix: "user:",
+        limit: BATCH_SIZE.KV_LIST,
+        cursor: userCursor ?? null,
       });
-    } catch (error) {
-      console.error("Error fetching all users social:", error);
-      return c.json(
-        { success: false, error: "Error fetching all users social" },
-        500,
-      );
+      userKeys.push(...userList.keys.map((k) => k.name));
+      userCursor = userList.list_complete ? undefined : userList.cursor;
+    } while (userCursor);
+
+    const userDataMap = await batchKVGet(c.env, userKeys, "USERS_KV");
+
+    const usersWithSocial: Array<{
+      userId: string;
+      handle: string;
+      followingCount: number;
+      followerCount: number;
+      actualFollowing: number;
+      actualFollowers: number;
+      following: string[];
+      followers: string[];
+    }> = [];
+
+    for (const [key, data] of userDataMap) {
+      const userId = key.replace("user:", "");
+      const user = safeJsonParse<{ handle: string }>(data);
+      if (!user?.handle) continue;
+
+      try {
+        const doId = c.env.USER_DO.idFromName(userId);
+        const stub = c.env.USER_DO.get(doId);
+
+        const [profileResp, followingResp, followersResp] = await Promise.all([
+          stub.fetch("https://do.internal/profile"),
+          stub.fetch("https://do.internal/following"),
+          stub.fetch("https://do.internal/followers"),
+        ]);
+
+        const profile = (await profileResp.json()) as {
+          followingCount?: number;
+          followerCount?: number;
+        };
+        const { following } = (await followingResp.json()) as {
+          following: string[];
+        };
+        const { followers } = (await followersResp.json()) as {
+          followers: string[];
+        };
+
+        usersWithSocial.push({
+          userId,
+          handle: user.handle,
+          followingCount: profile.followingCount || 0,
+          followerCount: profile.followerCount || 0,
+          actualFollowing: following?.length || 0,
+          actualFollowers: followers?.length || 0,
+          following: following || [],
+          followers: followers || [],
+        });
+      } catch (err) {
+        logger.error("Error fetching social", err, { handle: user.handle });
+      }
     }
-  },
-);
+
+    return c.json({
+      success: true,
+      data: {
+        users: usersWithSocial,
+        totalUsers: usersWithSocial.length,
+      },
+    });
+  } catch (error) {
+    logger.error("Error fetching all users social", error);
+    return c.json(
+      { success: false, error: "Error fetching all users social" },
+      500,
+    );
+  }
+});
 
 /**
  * POST /api/admin/repair/rebuild-all-social - Rebuild social graph for all users
@@ -1429,7 +1398,7 @@ admin.post(
             }
           }
         } catch (err) {
-          console.error(`Error scanning ${userId}:`, err);
+          logger.error("Error scanning user", err, { userId });
         }
       }
 
@@ -1499,7 +1468,7 @@ admin.post(
             newFollowers: correctFollowers.size,
           });
         } catch (err) {
-          console.error(`Error updating ${userId}:`, err);
+          logger.error("Error updating user", err, { userId });
         }
       }
 
@@ -1511,7 +1480,7 @@ admin.post(
         },
       });
     } catch (error) {
-      console.error("Error rebuilding all social:", error);
+      logger.error("Error rebuilding all social", error);
       return c.json(
         { success: false, error: "Error rebuilding all social" },
         500,
@@ -1659,7 +1628,7 @@ admin.get("/cron/refresh-explore", async (c) => {
       },
     });
   } catch (error) {
-    console.error("Error in cron refresh-explore:", error);
+    logger.error("Error in cron refresh-explore", error);
     return c.json(
       {
         success: false,

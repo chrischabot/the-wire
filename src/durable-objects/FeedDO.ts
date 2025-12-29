@@ -8,6 +8,7 @@ import type { PostMetadata } from "../types/post";
 import type { MutedWordEntry } from "../types/user";
 import { LIMITS } from "../constants";
 import { batchKVGet } from "../utils/batch";
+import { logger } from "../utils/logger";
 
 export interface FeedEntry {
   postId: string;
@@ -327,7 +328,7 @@ export class FeedDO implements DurableObject {
 
       return new Response("Not found", { status: 404 });
     } catch (error) {
-      console.error("FeedDO fetch error:", error);
+      logger.error("FeedDO fetch error", error);
       return new Response(JSON.stringify({ error: "Internal error" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },

@@ -5,6 +5,7 @@
 
 import { Hono } from "hono";
 import type { Env } from "../types/env";
+import { logger } from "../utils/logger";
 
 const unfurlRoutes = new Hono<{ Bindings: Env }>();
 
@@ -258,8 +259,8 @@ async function unfurlUrl(url: string): Promise<UnfurlResult> {
     if (result.description && result.description.length > 200) {
       result.description = result.description.substring(0, 200) + "...";
     }
-  } catch (error) {
-    console.error("Unfurl error:", error);
+  } catch (err) {
+    logger.error("Unfurl error", err, { url });
   }
 
   return result;

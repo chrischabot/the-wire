@@ -11,6 +11,7 @@ import type {
   MutedWordScope,
 } from "../types/user";
 import { PLACEHOLDERS } from "../constants";
+import { logger } from "../utils/logger";
 
 interface UserState {
   profile: UserProfile;
@@ -599,17 +600,13 @@ export class UserDO implements DurableObject {
     context?: Record<string, unknown>,
     error?: Error,
   ) {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      level,
-      message,
-      context: { durableObject: "UserDO", ...context },
-      ...(error && {
-        error: { name: error.name, message: error.message, stack: error.stack },
-      }),
-    };
+    const ctx = { durableObject: "UserDO", ...context };
     if (level === "error") {
-      console.error(JSON.stringify(entry));
+      logger.error(message, error, ctx);
+    } else if (level === "warn") {
+      logger.warn(message, ctx);
+    } else {
+      logger.info(message, ctx);
     }
   }
 

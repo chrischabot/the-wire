@@ -96,6 +96,7 @@ export interface PaginatedResponse<T> {
   data?: {
     items: T[];
     nextCursor?: string;
+    hasMore?: boolean;
   };
   error?: string;
 }

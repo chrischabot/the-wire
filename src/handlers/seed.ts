@@ -19,6 +19,7 @@ import { generateSalt, hashPassword } from "../utils/crypto";
 import { generateId } from "../services/snowflake";
 import { indexPostContent, indexUser } from "../utils/search-index";
 import { requireAdmin } from "../middleware/auth";
+import { logger } from "../utils/logger";
 
 const seed = new Hono<{ Bindings: Env }>();
 
@@ -398,7 +399,7 @@ seed.post("/reset", requireAdmin, async (c) => {
       log,
     });
   } catch (error) {
-    console.error("Error resetting database:", error);
+    logger.error("Error resetting database", error);
     return c.json({ success: false, error: "Failed to reset database" }, 500);
   }
 });
@@ -1752,86 +1753,216 @@ seed.post("/backfill-feed/:handle", requireAdmin, async (c) => {
  * POST /debug/rebuild-explore
  */
 seed.post("/rebuild-explore", requireAdmin, async (c) => {
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const scoredPosts: Array<{ post: PostMetadata; score: number }> = [];
+  try {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const scoredPosts: Array<{ post: PostMetadata; score: number }> = [];
 
-  let cursor: string | undefined;
-  let batchCount = 0;
-  const maxBatches = 25; // Limit to avoid timeout
+    let cursor: string | undefined;
+    let batchCount = 0;
+    const maxBatches = 10; // Reduced to avoid subrequest limits
 
-  while (batchCount < maxBatches) {
-    const listResult = await c.env.POSTS_KV.list({
-      prefix: "post:",
-      limit: 100,
-      ...(cursor ? { cursor } : {}),
-    });
-    batchCount++;
+    while (batchCount < maxBatches) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: "post:",
+        limit: 50, // Reduced batch size
+        ...(cursor ? { cursor } : {}),
+      });
+      batchCount++;
 
-    // Use Promise.all for concurrent fetches (like scheduled.ts does)
-    const batchPromises = listResult.keys.map(async (key) => {
-      const postData = await c.env.POSTS_KV.get(key.name);
-      if (!postData) return null;
+      // Sequential fetches to avoid subrequest limits
+      for (const key of listResult.keys) {
+        const postData = await c.env.POSTS_KV.get(key.name);
+        if (!postData) continue;
 
-      const post = JSON.parse(postData) as PostMetadata;
-      if (post.isDeleted || post.createdAt < sevenDaysAgo) return null;
+        const post = JSON.parse(postData) as PostMetadata;
+        if (post.isDeleted || post.createdAt < sevenDaysAgo) continue;
 
-      const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
-      const points =
-        (post.likeCount || 0) +
-        (post.replyCount || 0) * 2 +
-        (post.repostCount || 0) * 1.5;
-      const score = points / Math.pow(ageHours + 2, 1.8);
+        const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
+        const points =
+          (post.likeCount || 0) +
+          (post.replyCount || 0) * 2 +
+          (post.repostCount || 0) * 1.5;
+        const score = points / Math.pow(ageHours + 2, 1.8);
 
-      return { post, score };
-    });
+        scoredPosts.push({ post, score });
+      }
 
-    const results = await Promise.all(batchPromises);
-    for (const result of results) {
-      if (result) scoredPosts.push(result);
+      if (listResult.list_complete) break;
+      cursor = listResult.cursor;
     }
 
-    if (listResult.list_complete) break;
-    cursor = listResult.cursor;
-  }
+    scoredPosts.sort((a, b) => b.score - a.score);
 
-  scoredPosts.sort((a, b) => b.score - a.score);
+    // Apply diversity
+    const result: PostMetadata[] = [];
+    const pending = [...scoredPosts];
 
-  // Apply diversity
-  const result: PostMetadata[] = [];
-  const pending = [...scoredPosts];
+    while (pending.length > 0 && result.length < 100) {
+      let added = false;
+      for (let i = 0; i < pending.length; i++) {
+        const item = pending[i];
+        if (!item) continue;
+        const windowStart = Math.max(0, result.length - 4);
+        const window = result.slice(windowStart);
+        const authorCount = window.filter(
+          (p) => p.authorId === item.post.authorId,
+        ).length;
 
-  while (pending.length > 0 && result.length < 500) {
-    let added = false;
-    for (let i = 0; i < pending.length; i++) {
-      const item = pending[i];
-      if (!item) continue;
-      const windowStart = Math.max(0, result.length - 4);
-      const window = result.slice(windowStart);
-      const authorCount = window.filter(
-        (p) => p.authorId === item.post.authorId,
-      ).length;
-
-      if (authorCount < 2) {
-        result.push(item.post);
-        pending.splice(i, 1);
-        added = true;
-        break;
+        if (authorCount < 2) {
+          result.push(item.post);
+          pending.splice(i, 1);
+          added = true;
+          break;
+        }
+      }
+      if (!added && pending.length > 0) {
+        const first = pending.shift();
+        if (first) result.push(first.post);
       }
     }
-    if (!added && pending.length > 0) {
-      const first = pending.shift();
-      if (first) result.push(first.post);
-    }
+
+    await c.env.FEEDS_KV.put("explore:ranked", JSON.stringify(result), {
+      expirationTtl: 900,
+    });
+
+    return c.json({
+      success: true,
+      message: `Rebuilt explore cache with ${result.length} posts (scanned ${batchCount} batches, ${scoredPosts.length} scored)`,
+    });
+  } catch (err) {
+    return c.json({
+      success: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    }, 500);
   }
+});
 
-  await c.env.FEEDS_KV.put("explore:ranked", JSON.stringify(result), {
-    expirationTtl: 900,
-  });
+/**
+ * Repair avatar URLs in all posts by fetching from UserDO
+ * POST /debug/repair-avatars
+ * Processes a limited number of posts per call - run multiple times if needed
+ */
+seed.post("/repair-avatars", requireAdmin, async (c) => {
+  try {
+    // First, get all unique seed user handles and their profiles from UserDO
+    const seedHandles = [
+      "emmawilliams", "oliviabrown", "jessicadavis", "davidanderson",
+      "alexthompson", "kevinjackson", "benharris", "ameliasmith",
+      "sarahchen", "marcusjohnson", "jameswright", "sophiepatel",
+      "rachelgreen", "michaelwilson", "danielkim", "chrismartinez",
+      "ryanlee", "laurataylor", "hannahmoore", "nataliewhite",
+    ];
 
-  return c.json({
-    success: true,
-    message: `Rebuilt explore cache with ${result.length} posts`,
-  });
+    // Fetch profile data from UserDO (source of truth)
+    const userDataCache = new Map<string, { userId: string; displayName: string; avatarUrl: string }>();
+    const diagnostics: string[] = [];
+
+    // Sequential to avoid subrequest limits
+    for (const handle of seedHandles) {
+      const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+      if (!userId) {
+        diagnostics.push(`${handle}: no userId`);
+        continue;
+      }
+
+      // Fetch from UserDO directly (source of truth)
+      try {
+        const userDoId = c.env.USER_DO.idFromName(userId);
+        const userStub = c.env.USER_DO.get(userDoId);
+        const profileResp = await userStub.fetch("https://do.internal/profile");
+        if (profileResp.ok) {
+          const profile = (await profileResp.json()) as {
+            displayName?: string;
+            avatarUrl?: string;
+            handle?: string;
+          };
+          if (profile.avatarUrl) {
+            userDataCache.set(userId, {
+              userId,
+              displayName: profile.displayName || handle,
+              avatarUrl: profile.avatarUrl,
+            });
+            diagnostics.push(`${handle}: found avatar`);
+          } else {
+            diagnostics.push(`${handle}: no avatarUrl in DO`);
+          }
+        } else {
+          diagnostics.push(`${handle}: DO fetch failed ${profileResp.status}`);
+        }
+      } catch (err) {
+        diagnostics.push(`${handle}: error ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    }
+
+    // Now scan posts and fix those with missing avatars
+    const repaired: string[] = [];
+    const postDiagnostics: string[] = [];
+    let scanned = 0;
+    let needsRepair = 0;
+    let alreadyHasAvatar = 0;
+
+    // Accept cursor from query params to continue pagination
+    let cursor: string | undefined = c.req.query("cursor") || undefined;
+    const startCursor = cursor;
+
+    // Limit to 10 batches of 50 posts = 500 posts per call
+    for (let batch = 0; batch < 10; batch++) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: "post:",
+        limit: 50,
+        ...(cursor ? { cursor } : {}),
+      });
+
+      for (const key of listResult.keys) {
+        scanned++;
+        const postData = await c.env.POSTS_KV.get(key.name);
+        if (!postData) continue;
+
+        const post = JSON.parse(postData) as PostMetadata;
+        if (post.isDeleted) continue;
+
+        // Check if needs repair - empty OR placeholder (data:image/svg) avatars need fixing
+        const hasRealAvatar = post.authorAvatarUrl &&
+          post.authorAvatarUrl !== "" &&
+          !post.authorAvatarUrl.startsWith("data:image/svg");
+
+        if (!hasRealAvatar) {
+          needsRepair++;
+          const userData = userDataCache.get(post.authorId);
+          if (userData && !userData.avatarUrl.startsWith("data:image/svg")) {
+            post.authorAvatarUrl = userData.avatarUrl;
+            post.authorDisplayName = userData.displayName;
+            await c.env.POSTS_KV.put(key.name, JSON.stringify(post));
+            repaired.push(post.id);
+          } else if (postDiagnostics.length < 5) {
+            postDiagnostics.push(`Post ${post.id} by ${post.authorHandle} (${post.authorId}): no real avatar (userData: ${userData?.avatarUrl?.substring(0, 30) || 'none'})`);
+          }
+        } else {
+          alreadyHasAvatar++;
+        }
+      }
+
+      if (listResult.list_complete) break;
+      cursor = listResult.cursor;
+    }
+
+    return c.json({
+      success: true,
+      message: `Repaired ${repaired.length} posts (scanned ${scanned}, needsRepair: ${needsRepair}, alreadyHasAvatar: ${alreadyHasAvatar}, ${userDataCache.size} users with avatars)`,
+      diagnostics: diagnostics.slice(0, 25),
+      postDiagnostics,
+      userIds: Array.from(userDataCache.keys()).slice(0, 5),
+      repaired: repaired.slice(0, 20),
+      startedAt: startCursor || "beginning",
+      hasMore: cursor !== undefined,
+      nextCursor: cursor,
+    });
+  } catch (err) {
+    return c.json({
+      success: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    }, 500);
+  }
 });
 
 /**
@@ -2048,7 +2179,7 @@ seed.post("/quick-explore", requireAdmin, async (c) => {
       message: `Built explore cache with ${result.length} posts from ${allPosts.length} total`,
     });
   } catch (err) {
-    console.error("quick-explore error:", err);
+    logger.error("quick-explore error", err);
     return c.json({ success: false, error: String(err) }, 500);
   }
 });
@@ -2104,7 +2235,7 @@ seed.post("/rebuild-user-index", requireAdmin, async (c) => {
             indexed++;
           }
         } catch (err) {
-          console.error("Error indexing user:", key.name, err);
+          logger.error("Error indexing user", err, { key: key.name });
         }
       }
 
@@ -2117,7 +2248,7 @@ seed.post("/rebuild-user-index", requireAdmin, async (c) => {
       message: `Indexed ${indexed} users for search`,
     });
   } catch (err) {
-    console.error("rebuild-user-index error:", err);
+    logger.error("rebuild-user-index error", err);
     return c.json({ success: false, error: String(err) }, 500);
   }
 });

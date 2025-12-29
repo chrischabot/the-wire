@@ -14,6 +14,7 @@ export interface AuthUser {
   authProvider: AuthProvider;
   createdAt: number;
   lastLogin: number;
+  passwordChangedAt?: number;
 }
 
 /**

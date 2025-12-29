@@ -3,6 +3,8 @@
  * Manages WebSocket connections for a single user across multiple devices/tabs
  */
 
+import { logger } from "../utils/logger";
+
 interface WebSocketConnection {
   webSocket: WebSocket;
   connectionId: string;
@@ -57,7 +59,9 @@ export class WebSocketDO implements DurableObject {
       try {
         conn.webSocket.send(messageStr);
       } catch (error) {
-        console.error(`Error sending to connection ${id}:`, error);
+        logger.error("Error sending to connection", error, {
+          connectionId: id,
+        });
         this.connections.delete(id);
       }
     }
@@ -106,7 +110,7 @@ export class WebSocketDO implements DurableObject {
             );
           }
         } catch (error) {
-          console.error("Error handling WebSocket message:", error);
+          logger.error("Error handling WebSocket message", error);
         }
       });
 
@@ -117,7 +121,10 @@ export class WebSocketDO implements DurableObject {
 
       // Handle errors
       server.addEventListener("error", (event) => {
-        console.error("WebSocket error:", event);
+        logger.error(
+          "WebSocket error",
+          event instanceof Error ? event : undefined,
+        );
         this.connections.delete(connectionId);
       });
 
@@ -182,16 +189,17 @@ export class WebSocketDO implements DurableObject {
     return new Response("Not found", { status: 404 });
   }
 
-  /**
-   * Cleanup on DO deletion
-   */
   async alarm(): Promise<void> {
-    // Close all connections
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
     for (const [_id, conn] of this.connections) {
       try {
         conn.webSocket.close(1000, "Server shutdown");
       } catch {
-        // Already closed
+        // Connection already closed
       }
     }
     this.connections.clear();

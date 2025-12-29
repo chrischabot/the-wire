@@ -5,6 +5,7 @@
  * - Every 15 minutes: Update FoF (friends-of-friends) rankings
  * - Every hour: Cleanup old feed entries
  * - Daily: Compact KV storage
+ * - Twice daily (8 AM, 8 PM UTC): Generate AI news conversations
  */
 
 import type { Env } from "../types/env";
@@ -16,6 +17,8 @@ import {
   LIMITS,
   CACHE_TTL,
 } from "../constants";
+import { runNewsSeeder } from "./news-seed";
+import { logger } from "../utils/logger";
 
 interface RankedPost {
   postId: string;
@@ -49,10 +52,15 @@ export async function handleScheduled(
         // Daily - compact KV storage
         await compactKVStorage(env);
         break;
+
+      case "0 8,20 * * *":
+        // Twice daily (8 AM and 8 PM UTC) - generate AI news conversations
+        await runNewsSeeder(env);
+        break;
     }
-  } catch (error) {
-    console.error(`Scheduled task failed: ${cron}`, error);
-    throw error;
+  } catch (err) {
+    logger.error("Scheduled task failed", err, { cron });
+    throw err;
   }
 }
 

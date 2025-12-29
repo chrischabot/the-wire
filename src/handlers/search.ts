@@ -14,6 +14,7 @@ import { optionalAuth } from "../middleware/auth";
 import { LIMITS, SCORING } from "../constants";
 import { searchPostIds, searchUserIds, tokenize } from "../utils/search-index";
 import { batchKVGet } from "../utils/batch";
+import { logger } from "../utils/logger";
 
 const search = new Hono<{ Bindings: Env }>();
 
@@ -145,8 +146,8 @@ search.get("/", optionalAuth, async (c) => {
     }
 
     return c.json(response);
-  } catch (error) {
-    console.error("Search error:", error);
+  } catch (err) {
+    logger.error("Search failed", err, { query, type, userId });
     return c.json(
       {
         success: false,

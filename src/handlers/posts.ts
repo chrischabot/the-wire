@@ -23,6 +23,7 @@ import {
   forbidden,
   serverError,
 } from "../utils/response";
+import { logger } from "../utils/logger";
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -233,7 +234,10 @@ posts.get("/:id", optionalAuth, async (c) => {
         hasLiked = likedData.hasLiked;
         hasReposted = repostedData.hasReposted;
       } catch (err) {
-        console.error("Error checking liked/reposted status:", err);
+        logger.error("Error checking liked/reposted status", err, {
+          postId,
+          userId,
+        });
       }
     }
 
@@ -587,7 +591,10 @@ posts.post("/:id/like", requireAuth, async (c) => {
             postId,
           });
         } catch (notifError) {
-          console.error("Failed to create like notification:", notifError);
+          logger.error("Failed to create like notification", notifError, {
+            postId,
+            userId,
+          });
         }
       }
     }
@@ -602,12 +609,15 @@ posts.post("/:id/like", requireAuth, async (c) => {
         body: JSON.stringify({ postId }),
       });
     } catch (userErr) {
-      console.error("Failed to track liked post in UserDO:", userErr);
+      logger.error("Failed to track liked post in UserDO", userErr, {
+        postId,
+        userId,
+      });
     }
 
     return success({ likeCount });
   } catch (err) {
-    console.error("Error liking post:", err);
+    logger.error("Error liking post", err, { postId, userId });
     return serverError("Error liking post");
   }
 });
@@ -655,12 +665,15 @@ posts.delete("/:id/like", requireAuth, async (c) => {
         body: JSON.stringify({ postId }),
       });
     } catch (userErr) {
-      console.error("Failed to remove liked post from UserDO:", userErr);
+      logger.error("Failed to remove liked post from UserDO", userErr, {
+        postId,
+        userId,
+      });
     }
 
     return success({ likeCount });
   } catch (err) {
-    console.error("Error unliking post:", err);
+    logger.error("Error unliking post", err, { postId, userId });
     return serverError("Error unliking post");
   }
 });

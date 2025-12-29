@@ -18,6 +18,7 @@ import adminRoutes from "./handlers/admin";
 import notificationsRoutes from "./handlers/notifications";
 import searchRoutes from "./handlers/search";
 import seedRoutes from "./handlers/seed";
+import newsSeedRoutes from "./handlers/news-seed";
 import unfurlRoutes from "./handlers/unfurl";
 import batchRoutes from "./handlers/batch";
 import { rateLimit, RATE_LIMITS } from "./middleware/rate-limit";
@@ -27,9 +28,14 @@ import { handleScheduled } from "./handlers/scheduled";
 import { getStyles } from "./styles";
 import { getClientJS } from "./client-js";
 import { getLandingPage } from "./pages/landing";
+import { initLogger, logger } from "./utils/logger";
 
-// Create Hono app with environment typing
 const app = new Hono<{ Bindings: Env }>();
+
+app.use("*", async (c, next) => {
+  initLogger(c.env.ENVIRONMENT);
+  await next();
+});
 
 app.use("*", cors());
 app.use("/api/*", clerkAuthMiddleware);
@@ -188,7 +194,7 @@ app.get("/api/ws", async (c) => {
 
     return await wsStub.fetch(forwardedReq);
   } catch (error) {
-    console.error("WebSocket auth error:", error);
+    logger.error("WebSocket auth error", error);
     return c.json({ success: false, error: "Authentication failed" }, 401);
   }
 });
@@ -227,6 +233,9 @@ app.route("/api/batch", batchRoutes);
 
 // Mount seed routes (DEBUG ONLY - remove in production)
 app.route("/debug", seedRoutes);
+
+// Mount news seed routes (AI news aggregation and conversation generation)
+app.route("/debug/news", newsSeedRoutes);
 
 // Serve media files
 app.route("/media", mediaRoutes);
@@ -276,7 +285,7 @@ app.onError((err, c) => {
       url: c.req.url,
     },
   };
-  console.error(JSON.stringify(errorLog));
+  logger.error("Unhandled error", errorLog);
   return c.json({ success: false, error: "Internal server error" }, 500);
 });
 
@@ -426,7 +435,7 @@ async function queueHandler(
 
       message.ack();
     } catch (error) {
-      console.error("Error processing queue message:", error);
+      logger.error("Error processing queue message", error);
       const backoff = Math.min(3600, 30 ** message.attempts);
       message.retry({ delaySeconds: backoff });
     }

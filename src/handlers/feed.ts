@@ -17,6 +17,7 @@ import { LIMITS, BATCH_SIZE, SCORING } from "../constants";
 import { safeJsonParse, safeAtob } from "../utils/safe-parse";
 import { success, serverError } from "../utils/response";
 import { batchKVGet } from "../utils/batch";
+import { logger } from "../utils/logger";
 
 const feed = new Hono<{ Bindings: Env }>();
 
@@ -576,8 +577,8 @@ feed.get("/home", requireAuth, async (c) => {
     });
     setCachedResponse(cacheKey, response.clone(), c.executionCtx);
     return response;
-  } catch (error) {
-    console.error("Error fetching home feed:", error);
+  } catch (err) {
+    logger.error("Error fetching home feed", err, { userId });
     return serverError("Error fetching feed");
   }
 });
@@ -1125,8 +1126,10 @@ feed.get("/home-legacy", requireAuth, async (c) => {
             };
             enrichedPost.hasLiked = likedData.hasLiked;
             enrichedPost.hasReposted = repostedData.hasReposted;
-          } catch (error) {
-            console.error("Error checking interaction status:", error);
+          } catch (err) {
+            logger.error("Error checking interaction status", err, {
+              postId: enrichedPost.id,
+            });
           }
         }
 
@@ -1139,8 +1142,8 @@ feed.get("/home-legacy", requireAuth, async (c) => {
       nextCursor: feedData.cursor,
       hasMore: feedData.hasMore || filteredFofPosts.length > 0,
     });
-  } catch (error) {
-    console.error("Error fetching home feed:", error);
+  } catch (err) {
+    logger.error("Error fetching home feed", err, { userId });
     return serverError("Error fetching feed");
   }
 });
@@ -1366,8 +1369,8 @@ feed.get("/global", async (c) => {
     });
     setCachedResponse(cacheKey, response.clone(), c.executionCtx);
     return response;
-  } catch (error) {
-    console.error("Error fetching global feed:", error);
+  } catch (err) {
+    logger.error("Error fetching global feed", err);
     return serverError("Error fetching feed");
   }
 });
@@ -1466,8 +1469,8 @@ feed.get("/chronological", requireAuth, async (c) => {
       nextCursor: feedData.cursor,
       hasMore: feedData.hasMore,
     });
-  } catch (error) {
-    console.error("Error fetching chronological feed:", error);
+  } catch (err) {
+    logger.error("Error fetching chronological feed", err, { userId });
     return serverError("Error fetching feed");
   }
 });

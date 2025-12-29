@@ -4,6 +4,7 @@
  */
 
 import type { Post } from "../types/post";
+import { logger } from "../utils/logger";
 
 interface PostStateStored {
   post: Post;
@@ -283,7 +284,7 @@ export class PostDO implements DurableObject {
 
       return new Response("Not found", { status: 404 });
     } catch (error) {
-      console.error("PostDO fetch error:", error);
+      logger.error("PostDO fetch error", error);
       return new Response(JSON.stringify({ error: "Internal error" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },

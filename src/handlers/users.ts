@@ -26,6 +26,7 @@ import {
   forbidden,
   serverError,
 } from "../utils/response";
+import { logger } from "../utils/logger";
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -118,7 +119,7 @@ users.put("/me", requireAuth, async (c) => {
 
     return success(profile);
   } catch (error) {
-    console.error("Error updating profile:", error);
+    logger.error("Error updating profile", error, { userId });
     return serverError("Error updating profile");
   }
 });
@@ -136,8 +137,8 @@ users.get("/me/settings", requireAuth, async (c) => {
     const response = await stub.fetch("https://do.internal/settings");
     const settings: UserSettings = await response.json();
     return success(settings);
-  } catch (error) {
-    console.error("Error fetching settings:", error);
+  } catch (err) {
+    logger.error("Error fetching settings", err, { userId });
     return serverError("Error fetching settings");
   }
 });
@@ -171,8 +172,8 @@ users.put("/me/settings", requireAuth, async (c) => {
 
     const settings: UserSettings = await response.json();
     return success(settings);
-  } catch (error) {
-    console.error("Error updating settings:", error);
+  } catch (err) {
+    logger.error("Error updating settings", err, { userId });
     return serverError("Error updating settings");
   }
 });
@@ -253,7 +254,7 @@ users.get("/:handle", optionalAuth, async (c) => {
         expirationTtl: CACHE_TTL.PROFILE,
       });
     } catch (error) {
-      console.error("Error fetching profile from DO:", error);
+      logger.error("Error fetching profile from DO", error, { handle });
       return serverError("Error fetching profile");
     }
   }
@@ -274,7 +275,10 @@ users.get("/:handle", optionalAuth, async (c) => {
       const followData = (await followResp.json()) as { isFollowing: boolean };
       isFollowing = followData.isFollowing;
     } catch (error) {
-      console.error("Error checking follow status:", error);
+      logger.error("Error checking follow status", error, {
+        currentUserId,
+        profileId: profile.id,
+      });
     }
   }
 
@@ -290,7 +294,7 @@ users.get("/:handle", optionalAuth, async (c) => {
     const settingsResp = await stub.fetch("https://do.internal/settings");
     settings = await settingsResp.json();
   } catch (error) {
-    console.error("Error fetching settings:", error);
+    logger.error("Error fetching settings", error, { profileId: profile.id });
   }
 
   // If account is private and viewer is not the owner and not following, return limited profile
@@ -366,17 +370,46 @@ users.post(
 
     const currentDoId = c.env.USER_DO.idFromName(currentUserId);
     const currentStub = c.env.USER_DO.get(currentDoId);
-    await currentStub.fetch("https://do.internal/follow", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: targetUserId }),
-    });
 
-    await targetStub.fetch("https://do.internal/add-follower", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: currentUserId }),
-    });
+    // Execute both DO updates in parallel to reduce partial failure window
+    const [followResult, addFollowerResult] = await Promise.allSettled([
+      currentStub.fetch("https://do.internal/follow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: targetUserId }),
+      }),
+      targetStub.fetch("https://do.internal/add-follower", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: currentUserId }),
+      }),
+    ]);
+
+    // Check if either operation failed
+    if (
+      followResult.status === "rejected" ||
+      addFollowerResult.status === "rejected"
+    ) {
+      // Attempt rollback if one succeeded but other failed
+      if (
+        followResult.status === "fulfilled" &&
+        addFollowerResult.status === "rejected"
+      ) {
+        try {
+          await currentStub.fetch("https://do.internal/unfollow", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: targetUserId }),
+          });
+        } catch {
+          logger.error("Failed to rollback follow operation", undefined, {
+            currentUserId,
+            targetUserId,
+          });
+        }
+      }
+      return serverError("Failed to complete follow operation");
+    }
 
     await createNotification(c.env, {
       userId: targetUserId,
@@ -424,10 +457,10 @@ users.post(
         }
       }
     } catch (backfillErr) {
-      console.error(
-        "Failed to backfill posts from followed user:",
-        backfillErr,
-      );
+      logger.error("Failed to backfill posts from followed user", backfillErr, {
+        currentUserId,
+        targetUserId,
+      });
     }
 
     return c.json({
@@ -460,19 +493,48 @@ users.delete(
 
     const currentDoId = c.env.USER_DO.idFromName(currentUserId);
     const currentStub = c.env.USER_DO.get(currentDoId);
-    await currentStub.fetch("https://do.internal/unfollow", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: targetUserId }),
-    });
-
     const targetDoId = c.env.USER_DO.idFromName(targetUserId);
     const targetStub = c.env.USER_DO.get(targetDoId);
-    await targetStub.fetch("https://do.internal/remove-follower", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: currentUserId }),
-    });
+
+    // Execute both DO updates in parallel to reduce partial failure window
+    const [unfollowResult, removeFollowerResult] = await Promise.allSettled([
+      currentStub.fetch("https://do.internal/unfollow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: targetUserId }),
+      }),
+      targetStub.fetch("https://do.internal/remove-follower", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: currentUserId }),
+      }),
+    ]);
+
+    // Check if either operation failed
+    if (
+      unfollowResult.status === "rejected" ||
+      removeFollowerResult.status === "rejected"
+    ) {
+      // Attempt rollback if one succeeded but other failed
+      if (
+        unfollowResult.status === "fulfilled" &&
+        removeFollowerResult.status === "rejected"
+      ) {
+        try {
+          await currentStub.fetch("https://do.internal/follow", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: targetUserId }),
+          });
+        } catch {
+          logger.error("Failed to rollback unfollow operation", undefined, {
+            currentUserId,
+            targetUserId,
+          });
+        }
+      }
+      return serverError("Failed to complete unfollow operation");
+    }
 
     return c.json({
       success: true,
@@ -581,7 +643,9 @@ users.get("/:handle/followers", optionalAuth, async (c) => {
       };
       currentUserFollowing = new Set(followingData.following || []);
     } catch (err) {
-      console.error("Error fetching current user following:", err);
+      logger.error("Error fetching current user following", err, {
+        currentUserId,
+      });
     }
   }
 
@@ -731,7 +795,9 @@ users.get("/:handle/following", optionalAuth, async (c) => {
       };
       currentUserFollowing = new Set(currentFollowingData.following || []);
     } catch (err) {
-      console.error("Error fetching current user following:", err);
+      logger.error("Error fetching current user following", err, {
+        currentUserId,
+      });
     }
   }
 
@@ -1285,7 +1351,7 @@ users.get("/:handle/likes", async (c) => {
       data: { posts },
     });
   } catch (error) {
-    console.error("Error fetching likes:", error);
+    logger.error("Error fetching likes", error, { userId });
     return c.json(
       {
         success: false,

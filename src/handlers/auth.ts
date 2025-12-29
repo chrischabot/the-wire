@@ -86,20 +86,18 @@ auth.post("/signup", rateLimit(RATE_LIMITS.signup), async (c) => {
   log.debug("Input normalized", { email, handle });
 
   try {
-    // Check if email already exists
     log.debug("Checking if email exists");
     const existingEmail = await c.env.USERS_KV.get(`email:${email}`);
     if (existingEmail) {
       log.warn("Email already registered", { email });
-      return error("Email already registered", 409);
+      return error("Unable to create account with these credentials", 409);
     }
 
-    // Check if handle already exists
     log.debug("Checking if handle exists");
     const existingHandle = await c.env.USERS_KV.get(`handle:${handle}`);
     if (existingHandle) {
       log.warn("Handle already taken", { handle });
-      return error("Handle already taken", 409);
+      return error("Unable to create account with these credentials", 409);
     }
 
     // Create user
@@ -732,12 +730,12 @@ auth.post(
 
     const authUser: AuthUser = JSON.parse(userData);
 
-    // Update password
     const newSalt = generateSalt();
     const newPasswordHash = await hashPassword(body.newPassword, newSalt);
 
     authUser.passwordHash = newPasswordHash;
     authUser.salt = newSalt;
+    authUser.passwordChangedAt = Date.now();
 
     await c.env.USERS_KV.put(`user:${userId}`, JSON.stringify(authUser));
 

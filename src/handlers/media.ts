@@ -7,6 +7,7 @@ import type { Env } from "../types/env";
 import { generateId } from "../services/snowflake";
 import { requireAuth } from "../middleware/auth";
 import { rateLimit, RATE_LIMITS } from "../middleware/rate-limit";
+import { logger } from "../utils/logger";
 
 const media = new Hono<{ Bindings: Env }>();
 
@@ -195,7 +196,7 @@ media.post("/upload", requireAuth, rateLimit(RATE_LIMITS.upload), async (c) => {
       },
     });
   } catch (error) {
-    console.error("R2 upload error:", error);
+    logger.error("R2 upload error", error, { userId, contentType: file.type });
     return c.json({ success: false, error: "Failed to upload media" }, 500);
   }
 });
@@ -270,7 +271,7 @@ media.put("/users/me/avatar", requireAuth, async (c) => {
       },
     });
   } catch (error) {
-    console.error("Avatar upload error:", error);
+    logger.error("Avatar upload error", error, { userId });
     return c.json({ success: false, error: "Failed to upload avatar" }, 500);
   }
 });
@@ -345,7 +346,7 @@ media.put("/users/me/banner", requireAuth, async (c) => {
       },
     });
   } catch (error) {
-    console.error("Banner upload error:", error);
+    logger.error("Banner upload error", error, { userId });
     return c.json({ success: false, error: "Failed to upload banner" }, 500);
   }
 });
@@ -376,7 +377,7 @@ media.get("/:key{.+}", async (c) => {
       },
     });
   } catch (error) {
-    console.error("R2 retrieval error:", error);
+    logger.error("R2 retrieval error", error, { key });
     return c.json({ success: false, error: "Failed to retrieve media" }, 500);
   }
 });

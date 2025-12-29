@@ -12,6 +12,7 @@ import { generateId } from "./snowflake";
 import { detectMentions } from "../shared/utils";
 import { safeJsonParse, safeAtob } from "../utils/safe-parse";
 import { batchKVGet } from "../utils/batch";
+import { logger } from "../utils/logger";
 
 /**
  * Create a notification
@@ -74,7 +75,9 @@ export async function createNotification(
     });
   } catch (error) {
     // WebSocket broadcast failure is non-critical, notification is still stored
-    console.error("Failed to broadcast notification via WebSocket:", error);
+    logger.error("Failed to broadcast notification via WebSocket", error, {
+      userId: request.userId,
+    });
   }
 
   return notification;
@@ -124,11 +127,8 @@ export async function createMentionNotifications(
         postId,
         content: content.slice(0, 100), // Preview
       });
-    } catch (error) {
-      console.error(
-        `[Mentions] Error creating notification for @${handle}:`,
-        error,
-      );
+    } catch (err) {
+      logger.error("Error creating notification for mention", err, { handle });
     }
   }
 }

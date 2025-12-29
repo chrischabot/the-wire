@@ -48,6 +48,9 @@ export interface Env {
   // External APIs
   ANTHROPIC_API_KEY?: string;
 
+  // Admin bypass secret (for scripts/debug endpoints)
+  ADMIN_SECRET?: string;
+
   // Clerk Authentication
   CLERK_SECRET_KEY?: string;
   CLERK_PUBLISHABLE_KEY?: string;
