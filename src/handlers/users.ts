@@ -804,9 +804,11 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
 
 /**
  * GET /api/users/:handle/replies - Get user's replies
+ * Returns replies with parent post author info for "Replying to @handle" display
  */
 users.get("/:handle/replies", optionalAuth, async (c) => {
   const handle = normalizeHandle(c.req.param("handle"));
+  const cursor = c.req.query("cursor");
   const limit = Math.min(
     parseInt(c.req.query("limit") || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10),
     LIMITS.MAX_PAGINATION_LIMIT,
@@ -817,10 +819,23 @@ users.get("/:handle/replies", optionalAuth, async (c) => {
     return notFound("User not found");
   }
 
+  // Parse cursor (offset-based pagination)
+  let offset = 0;
+  if (cursor) {
+    try {
+      const decoded = safeAtob(cursor);
+      if (decoded) {
+        offset = parseInt(decoded, 10) || 0;
+      }
+    } catch {
+      offset = 0;
+    }
+  }
+
   const posts: PostMetadata[] = [];
   let postCursor: string | undefined;
 
-  while (posts.length < limit) {
+  while (posts.length < limit + offset) {
     const listResult = await c.env.POSTS_KV.list({
       prefix: "post:",
       limit: BATCH_SIZE.KV_LIST,
@@ -828,7 +843,6 @@ users.get("/:handle/replies", optionalAuth, async (c) => {
     });
 
     for (const key of listResult.keys) {
-      if (posts.length >= limit) break;
       const postData = await c.env.POSTS_KV.get(key.name);
       if (!postData) continue;
       const post = safeJsonParse<PostMetadata>(postData);
@@ -849,11 +863,153 @@ users.get("/:handle/replies", optionalAuth, async (c) => {
 
   posts.sort((a, b) => b.createdAt - a.createdAt);
 
-  // Return posts without hasLiked status - client can fetch lazily if needed
+  // Apply pagination
+  const paginatedPosts = posts.slice(offset, offset + limit);
+
+  // Fetch parent post info for each reply to get "Replying to @handle"
+  const enrichedPosts = await Promise.all(
+    paginatedPosts.map(async (post) => {
+      let replyToHandle: string | undefined;
+      let replyToDisplayName: string | undefined;
+
+      if (post.replyToId) {
+        const parentPostData = await c.env.POSTS_KV.get(
+          `post:${post.replyToId}`,
+        );
+        if (parentPostData) {
+          const parentPost = safeJsonParse<PostMetadata>(parentPostData);
+          if (parentPost) {
+            replyToHandle = parentPost.authorHandle;
+            replyToDisplayName = parentPost.authorDisplayName;
+          }
+        }
+      }
+
+      return {
+        ...post,
+        hasLiked: false,
+        replyToHandle,
+        replyToDisplayName,
+      };
+    }),
+  );
+
+  const hasMore = posts.length > offset + limit;
+  const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
+
   return c.json({
     success: true,
     data: {
-      items: posts.slice(0, limit).map((p) => ({ ...p, hasLiked: false })),
+      items: enrichedPosts,
+      nextCursor,
+      hasMore,
+    },
+  });
+});
+
+/**
+ * GET /api/users/:handle/media - Get user's posts with media (images/videos)
+ */
+users.get("/:handle/media", optionalAuth, async (c) => {
+  const handle = normalizeHandle(c.req.param("handle"));
+  const cursor = c.req.query("cursor");
+  const limit = Math.min(
+    parseInt(c.req.query("limit") || String(LIMITS.DEFAULT_FEED_PAGE_SIZE), 10),
+    LIMITS.MAX_PAGINATION_LIMIT,
+  );
+
+  const userId = await c.env.USERS_KV.get(`handle:${handle}`);
+  if (!userId) {
+    return notFound("User not found");
+  }
+
+  // Parse cursor (offset-based pagination)
+  let offset = 0;
+  if (cursor) {
+    try {
+      const decoded = safeAtob(cursor);
+      if (decoded) {
+        offset = parseInt(decoded, 10) || 0;
+      }
+    } catch {
+      offset = 0;
+    }
+  }
+
+  const posts: PostMetadata[] = [];
+
+  // Try fast path: use author posts index
+  const authorPostsKey = `user-posts:${userId}`;
+  const indexData = await c.env.POSTS_KV.get(authorPostsKey);
+
+  if (indexData) {
+    // Fast path: fetch posts from index
+    const postIds = safeJsonParse<string[]>(indexData);
+    if (postIds) {
+      // Fetch enough posts to account for filtering
+      for (const postId of postIds) {
+        if (posts.length >= limit + offset) break;
+
+        const postData = await c.env.POSTS_KV.get(`post:${postId}`);
+        if (!postData) continue;
+        const post = safeJsonParse<PostMetadata>(postData);
+        if (!post) continue;
+        if (post.isDeleted || post.isTakenDown) continue;
+        // Only include posts with media
+        if (post.mediaUrls && post.mediaUrls.length > 0) {
+          posts.push(post);
+        }
+      }
+    }
+  } else {
+    // Fallback: scan all posts
+    let postCursor: string | undefined;
+    let scannedBatches = 0;
+    const maxBatches = 20;
+
+    while (posts.length < limit + offset && scannedBatches < maxBatches) {
+      const listResult = await c.env.POSTS_KV.list({
+        prefix: "post:",
+        limit: BATCH_SIZE.KV_LIST,
+        cursor: postCursor ?? null,
+      });
+      scannedBatches++;
+
+      for (const key of listResult.keys) {
+        const postData = await c.env.POSTS_KV.get(key.name);
+        if (!postData) continue;
+        const post = safeJsonParse<PostMetadata>(postData);
+        if (!post) continue;
+        if (
+          post.authorId === userId &&
+          !post.isDeleted &&
+          !post.isTakenDown &&
+          post.mediaUrls &&
+          post.mediaUrls.length > 0
+        ) {
+          posts.push(post);
+        }
+      }
+
+      if (listResult.list_complete) break;
+      postCursor = listResult.cursor;
+    }
+
+    posts.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  // Apply pagination
+  const paginatedPosts = posts.slice(offset, offset + limit);
+
+  const hasMore = posts.length > offset + limit;
+  const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
+
+  return c.json({
+    success: true,
+    data: {
+      items: paginatedPosts.map((p) => ({ ...p, hasLiked: false })),
+      nextCursor,
+      hasMore,
     },
   });
 });

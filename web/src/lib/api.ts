@@ -40,6 +40,8 @@ export interface Post {
   content: string;
   mediaUrls: string[];
   replyToId?: string;
+  replyToHandle?: string;
+  replyToDisplayName?: string;
   quoteOfId?: string;
   repostOfId?: string;
   createdAt: number;
@@ -347,6 +349,26 @@ export const feedApi = {
     limit = 20,
   ): Promise<PaginatedResponse<Post>> {
     let url = `/users/${handle}/posts?limit=${limit}`;
+    if (cursor) url += `&cursor=${cursor}`;
+    return (await apiRequest(url)) as PaginatedResponse<Post>;
+  },
+
+  async getUserReplies(
+    handle: string,
+    cursor?: string,
+    limit = 20,
+  ): Promise<PaginatedResponse<Post>> {
+    let url = `/users/${handle}/replies?limit=${limit}`;
+    if (cursor) url += `&cursor=${cursor}`;
+    return (await apiRequest(url)) as PaginatedResponse<Post>;
+  },
+
+  async getUserMedia(
+    handle: string,
+    cursor?: string,
+    limit = 20,
+  ): Promise<PaginatedResponse<Post>> {
+    let url = `/users/${handle}/media?limit=${limit}`;
     if (cursor) url += `&cursor=${cursor}`;
     return (await apiRequest(url)) as PaginatedResponse<Post>;
   },

@@ -169,9 +169,9 @@ export function ProfilePage() {
   const { handle } = useParams<{ handle: string }>();
   const currentUser = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<
-    "posts" | "replies" | "media" | "likes"
-  >("posts");
+  const [activeTab, setActiveTab] = useState<"posts" | "replies" | "media">(
+    "posts",
+  );
   const [modalImage, setModalImage] = useState<string | null>(null);
 
   const isOwnProfile =
@@ -187,22 +187,59 @@ export function ProfilePage() {
 
   const {
     data: postsData,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
+    fetchNextPage: fetchNextPosts,
+    hasNextPage: hasNextPosts,
+    isFetchingNextPage: isFetchingNextPosts,
     isLoading: postsLoading,
   } = useInfiniteQuery({
-    queryKey: ["userPosts", handle, activeTab],
+    queryKey: ["userPosts", handle],
     queryFn: async ({ pageParam }) => {
       const response = await feedApi.getUserTimeline(handle!, pageParam);
       return response.data;
     },
     getNextPageParam: (lastPage) => lastPage?.nextCursor,
     initialPageParam: undefined as string | undefined,
-    enabled: !!handle && activeTab === "posts",
+    enabled: !!handle,
+  });
+
+  const {
+    data: repliesData,
+    fetchNextPage: fetchNextReplies,
+    hasNextPage: hasNextReplies,
+    isFetchingNextPage: isFetchingNextReplies,
+    isLoading: repliesLoading,
+  } = useInfiniteQuery({
+    queryKey: ["userReplies", handle],
+    queryFn: async ({ pageParam }) => {
+      const response = await feedApi.getUserReplies(handle!, pageParam);
+      return response.data;
+    },
+    getNextPageParam: (lastPage) => lastPage?.nextCursor,
+    initialPageParam: undefined as string | undefined,
+    enabled: !!handle && activeTab === "replies",
+  });
+
+  const {
+    data: mediaData,
+    fetchNextPage: fetchNextMedia,
+    hasNextPage: hasNextMedia,
+    isFetchingNextPage: isFetchingNextMedia,
+    isLoading: mediaLoading,
+  } = useInfiniteQuery({
+    queryKey: ["userMedia", handle],
+    queryFn: async ({ pageParam }) => {
+      const response = await feedApi.getUserMedia(handle!, pageParam);
+      return response.data;
+    },
+    getNextPageParam: (lastPage) => lastPage?.nextCursor,
+    initialPageParam: undefined as string | undefined,
+    enabled: !!handle && activeTab === "media",
   });
 
   const posts = postsData?.pages.flatMap((page) => page?.items ?? []) ?? [];
+  const replies = repliesData?.pages.flatMap((page) => page?.items ?? []) ?? [];
+  const mediaPosts =
+    mediaData?.pages.flatMap((page) => page?.items ?? []) ?? [];
 
   const followMutation = useMutation({
     mutationFn: () =>
@@ -215,16 +252,35 @@ export function ProfilePage() {
   });
 
   const handleScroll = useCallback(() => {
-    if (isFetchingNextPage || !hasNextPage) return;
-
     const scrollTop = window.scrollY;
     const windowHeight = window.innerHeight;
     const docHeight = document.documentElement.scrollHeight;
 
-    if (scrollTop + windowHeight >= docHeight - 300) {
-      fetchNextPage();
+    if (scrollTop + windowHeight < docHeight - 300) return;
+
+    if (activeTab === "posts" && hasNextPosts && !isFetchingNextPosts) {
+      fetchNextPosts();
+    } else if (
+      activeTab === "replies" &&
+      hasNextReplies &&
+      !isFetchingNextReplies
+    ) {
+      fetchNextReplies();
+    } else if (activeTab === "media" && hasNextMedia && !isFetchingNextMedia) {
+      fetchNextMedia();
     }
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+  }, [
+    activeTab,
+    fetchNextPosts,
+    hasNextPosts,
+    isFetchingNextPosts,
+    fetchNextReplies,
+    hasNextReplies,
+    isFetchingNextReplies,
+    fetchNextMedia,
+    hasNextMedia,
+    isFetchingNextMedia,
+  ]);
 
   useEffect(() => {
     window.addEventListener("scroll", handleScroll);
@@ -398,16 +454,6 @@ export function ProfilePage() {
           Media
           {activeTab === "media" && <div style={styles.tabIndicator} />}
         </button>
-        <button
-          style={{
-            ...styles.tab,
-            ...(activeTab === "likes" ? styles.tabActive : {}),
-          }}
-          onClick={() => setActiveTab("likes")}
-        >
-          Likes
-          {activeTab === "likes" && <div style={styles.tabIndicator} />}
-        </button>
       </div>
 
       <div>
@@ -425,7 +471,7 @@ export function ProfilePage() {
               <PostCard key={post.id} post={post} />
             ))}
 
-            {isFetchingNextPage && (
+            {isFetchingNextPosts && (
               <div style={styles.loadingMore}>
                 <div style={styles.spinner} />
               </div>
@@ -434,15 +480,47 @@ export function ProfilePage() {
         )}
 
         {activeTab === "replies" && (
-          <div style={styles.emptyState}>Replies coming soon</div>
+          <>
+            {repliesLoading && (
+              <div style={styles.emptyState}>Loading replies...</div>
+            )}
+
+            {!repliesLoading && replies.length === 0 && (
+              <div style={styles.emptyState}>No replies yet</div>
+            )}
+
+            {replies.map((post) => (
+              <PostCard key={post.id} post={post} />
+            ))}
+
+            {isFetchingNextReplies && (
+              <div style={styles.loadingMore}>
+                <div style={styles.spinner} />
+              </div>
+            )}
+          </>
         )}
 
         {activeTab === "media" && (
-          <div style={styles.emptyState}>Media coming soon</div>
-        )}
+          <>
+            {mediaLoading && (
+              <div style={styles.emptyState}>Loading media...</div>
+            )}
 
-        {activeTab === "likes" && (
-          <div style={styles.emptyState}>Likes coming soon</div>
+            {!mediaLoading && mediaPosts.length === 0 && (
+              <div style={styles.emptyState}>No media posts yet</div>
+            )}
+
+            {mediaPosts.map((post) => (
+              <PostCard key={post.id} post={post} />
+            ))}
+
+            {isFetchingNextMedia && (
+              <div style={styles.loadingMore}>
+                <div style={styles.spinner} />
+              </div>
+            )}
+          </>
         )}
       </div>
     </AppLayout>

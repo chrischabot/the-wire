@@ -38,21 +38,29 @@ const linkCardStyles = {
     overflow: "hidden",
     cursor: "pointer",
     transition: "background 0.2s",
+    width: "100%",
+    maxWidth: "100%",
+    boxSizing: "border-box" as const,
   } as React.CSSProperties,
   image: {
     width: "100%",
+    maxWidth: "100%",
     height: "200px",
     objectFit: "cover" as const,
     display: "block",
   } as React.CSSProperties,
   smallImage: {
-    width: "120px",
-    height: "120px",
+    width: "100px",
+    minWidth: "100px",
+    maxWidth: "100px",
+    height: "100px",
     objectFit: "cover" as const,
     flexShrink: 0,
   } as React.CSSProperties,
   content: {
     padding: "12px",
+    minWidth: 0,
+    overflow: "hidden",
   } as React.CSSProperties,
   domain: {
     fontSize: "13px",
@@ -72,6 +80,7 @@ const linkCardStyles = {
     display: "-webkit-box",
     WebkitLineClamp: 2,
     WebkitBoxOrient: "vertical" as const,
+    wordBreak: "break-word" as const,
   } as React.CSSProperties,
   description: {
     fontSize: "14px",
@@ -81,6 +90,7 @@ const linkCardStyles = {
     display: "-webkit-box",
     WebkitLineClamp: 2,
     WebkitBoxOrient: "vertical" as const,
+    wordBreak: "break-word" as const,
   } as React.CSSProperties,
   smallContainer: {
     marginTop: "12px",
@@ -89,12 +99,18 @@ const linkCardStyles = {
     overflow: "hidden",
     cursor: "pointer",
     display: "flex",
+    width: "100%",
+    maxWidth: "100%",
+    boxSizing: "border-box" as const,
   } as React.CSSProperties,
   youtubeContainer: {
     marginTop: "12px",
     borderRadius: "16px",
     overflow: "hidden",
     aspectRatio: "16 / 9",
+    width: "100%",
+    maxWidth: "100%",
+    boxSizing: "border-box" as const,
   } as React.CSSProperties,
   youtubeIframe: {
     width: "100%",
@@ -188,30 +204,11 @@ function LinkCard({ url }: { url: string }) {
   }
 
   const hostname = new URL(url).hostname.replace(/^www\./, "");
-  const isSmallCard = data.type === "summary" || !data.image;
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     window.open(url, "_blank", "noopener,noreferrer");
   };
-
-  if (isSmallCard && data.image) {
-    return (
-      <div style={linkCardStyles.smallContainer} onClick={handleClick}>
-        <img src={data.image} alt="" style={linkCardStyles.smallImage} />
-        <div style={linkCardStyles.content}>
-          <div style={linkCardStyles.domain}>
-            <ExternalLink size={12} />
-            {hostname}
-          </div>
-          {data.title && <div style={linkCardStyles.title}>{data.title}</div>}
-          {data.description && (
-            <div style={linkCardStyles.description}>{data.description}</div>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={linkCardStyles.container} onClick={handleClick}>
@@ -517,6 +514,25 @@ export function PostCard({
                 </div>
               )}
             </div>
+
+            {displayPost.replyToHandle && (
+              <div
+                style={{
+                  fontSize: "13px",
+                  color: "var(--muted-foreground)",
+                  marginBottom: "4px",
+                }}
+              >
+                Replying to{" "}
+                <Link
+                  to={`/u/${displayPost.replyToHandle}`}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ color: "var(--primary)", textDecoration: "none" }}
+                >
+                  @{displayPost.replyToHandle}
+                </Link>
+              </div>
+            )}
 
             {displayPost.content && (
               <div
