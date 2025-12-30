@@ -1,347 +1,637 @@
-# The Wire - Implementation Plan
+# The Wire - Build Specification
 
-## Executive Summary
-
-This document captures the comprehensive code audit findings for "The Wire" - a Twitter-like social network built on Cloudflare edge infrastructure. The codebase implements approximately 70% of the planned features, with a solid foundation but missing key differentiating features and requiring security hardening before production deployment.
+Build a fully-featured Twitter clone called "The Wire" running entirely on Cloudflare edge infrastructure. Posts are called "Notes" (280 char max). Prioritize low latency, horizontal scalability, and eventual consistency.
 
 ---
 
-## Original Specification
+## Core Stack
 
-### Goal
-Build a fully featured, globally distributed Twitter-like social network running entirely on Cloudflare edge infrastructure, prioritizing low latency, horizontal scalability, and eventual consistency.
-
-### Core Stack
-- Cloudflare Workers (HTTP API + edge logic)
-- Durable Objects (stateful coordination)
-- Workers KV (global read-heavy data)
-- R2 (media storage)
-- Queues (fan-out + async work)
-- Cron Triggers (ranking + cleanup jobs)
-
----
-
-## Feature Analysis: Implemented vs. Missing
-
-### 1. Core Stack
-
-| Component | Spec Requirement | Status | Notes |
-|-----------|-----------------|--------|-------|
-| Cloudflare Workers | HTTP API + edge logic | ✅ Implemented | Hono framework |
-| Durable Objects | Stateful coordination | ✅ Implemented | UserDO, PostDO, FeedDO |
-| Workers KV | Global read-heavy data | ✅ Implemented | USERS_KV, POSTS_KV, SESSIONS_KV, FEEDS_KV |
-| R2 | Media storage | ✅ Implemented | MEDIA_BUCKET |
-| Queues | Fan-out + async work | ⚠️ Partial | Queue defined but fan-out incomplete |
-| Cron Triggers | Ranking + cleanup jobs | ❌ Not Implemented | Defined in wrangler.toml but no handler |
-
-### 2. Identity & Authentication
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Email + password signup | ✅ Implemented | `auth.ts` |
-| Hash + salt storage | ✅ Implemented | PBKDF2 with 100k iterations |
-| JWT tokens | ✅ Implemented | Using `jose` library |
-| Token validation at edge | ✅ Implemented | Middleware |
-| No email verification | ✅ Correctly skipped | Per spec |
-
-### 3. Users & Profiles
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| One UserDO per user | ✅ Implemented | |
-| Public profile page | ✅ Implemented | |
-| Avatar, display name, @handle | ✅ Implemented | |
-| Bio, location, website | ✅ Implemented | |
-| Join date | ✅ Implemented | `joinedAt` field |
-| Follower/following counts | ✅ Implemented | |
-| Post count | ✅ Implemented | |
-| Follows list | ✅ Implemented | |
-| Followers list | ✅ Implemented | |
-| Block list | ✅ Implemented | |
-| Muted words | ✅ Implemented | In UserSettings |
-| User bans | ❌ Missing | No ban system |
-| Profile verification | ⚠️ Stub only | Field exists but no verification logic |
-
-### 4. Posts (Notes)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Immutable posts | ✅ Implemented | |
-| Snowflake IDs | ✅ Implemented | Custom implementation |
-| 280 character limit | ✅ Implemented | Configurable via env |
-| Media URLs in posts | ✅ Implemented | |
-| Reply support | ✅ Implemented | `replyToId` field |
-| Quote posts | ✅ Implemented | `quoteOfId` field |
-| Like count | ✅ Implemented | PostDO coordination |
-| Reply count | ✅ Implemented | |
-| Repost count | ⚠️ Partial | Counter exists but no repost API |
-| Quote count | ✅ Implemented | |
-| Deleted flag | ✅ Implemented | Soft delete |
-
-### 5. Media
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Image upload | ✅ Implemented | JPEG, PNG, WebP, GIF |
-| Video upload | ✅ Implemented | MP4, WebM |
-| R2 storage | ✅ Implemented | |
-| Avatar upload | ✅ Implemented | |
-| Banner upload | ✅ Implemented | |
-| Image resizing params | ✅ Implemented | Width, height, quality, fit |
-| Actual image transformation | ❌ Not working | R2 objects don't support CF Image Resizing directly |
-
-### 6. Feed System
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| One FeedDO per user | ✅ Implemented | |
-| Ordered post IDs | ✅ Implemented | |
-| Pagination with cursor | ✅ Implemented | Base64 encoded |
-| Block list filtering | ✅ Implemented | |
-| Muted words filtering | ✅ Implemented | |
-| Round-robin merge algorithm | ❌ Missing | Spec: "2 posts from followed + 1 FoF" |
-| Friends-of-friends posts | ❌ Missing | Not implemented |
-| Hacker News ranking | ❌ Missing | Not implemented |
-| Cron-based ranking updates | ❌ Missing | No cron handler |
-
-### 7. Fan-out System
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Queue configuration | ✅ Implemented | FANOUT_QUEUE |
-| Queue consumer | ✅ Implemented | `queue()` function in index.ts |
-| Fan-out on post creation | ✅ Implemented | Sends to followers |
-| Delete fan-out | ⚠️ Partial | Message type exists but not processed |
-
-### 8. Moderation
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Blocked user filtering | ✅ Implemented | In feed |
-| Muted words filtering | ✅ Implemented | In feed |
-| User-level bans | ❌ Missing | No admin ban system |
-| Post takedowns | ❌ Missing | Only self-delete |
-| Ban enforcement globally | ❌ Missing | |
-
-### 9. Real-time (Optional)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| WebSocket DOs | ❌ Not Implemented | Stub only (501 response) |
-| Live feed updates | ❌ Missing | |
-| Notifications | ❌ Missing | |
-
-### 10. Testing
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Scale test: 1000 users | ⚠️ Partial | Harness configured for 2000 users |
-| Random follow graphs | ✅ Implemented | In load harness |
-| Posts, likes, replies | ✅ Implemented | |
-| Media uploads in tests | ❌ Missing | |
-| Load simulation | ✅ Implemented | |
-| Feed correctness verification | ✅ Implemented | |
-| Muted/blocks propagation test | ❌ Missing | |
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| Runtime | Cloudflare Workers | Edge compute, HTTP routing |
+| Framework | Hono | Lightweight routing, middleware |
+| State (Authoritative) | Durable Objects | User state, post interactions, feeds |
+| Cache (Global) | KV Namespaces | Profiles, posts, sessions, search indexes |
+| Media | R2 | Images, videos, avatars |
+| Async | Queues | Post fanout to follower feeds |
+| Frontend | React + Vite SPA | Modern single-page application |
+| Auth | Clerk | OAuth (Google, Apple) + email/password |
 
 ---
 
-## Bugs Identified
+## Durable Objects
 
-### BUG-1: Image Resizing Doesn't Work
-**Location:** `handlers/media.ts:167-178`
-**Issue:** Cloudflare Image Resizing requires requests through CF's proxy with image URLs, not R2 object bodies. The `cf.image` option only works with fetch requests to image URLs.
-**Fix:** Remove non-functional params or implement via image processing library.
+### UserDO (one per user)
+- Profile: displayName, handle, bio, location, website, avatarUrl, bannerUrl
+- Settings: theme preference, notification settings, muted words
+- Social graph: following (Set), followers (Set), blocked (Set)
+- Engagement tracking: likedPostsSet (Set), repostedPostsSet (Set)
+- Stats: postCount, followerCount, followingCount
 
-### BUG-2: CounterDO Not Implemented
-**Location:** `index.ts:540-545`
-**Issue:** Defined in wrangler.toml but returns 501 Not Implemented.
-**Fix:** Either implement or remove from config.
+### PostDO (one per post)
+- Post metadata and content
+- Interaction sets: likesSet (Set), repostsSet (Set) - use Sets for O(1) lookups
+- Counts: likeCount, replyCount, repostCount, quoteCount
 
-### BUG-3: Delete Post Doesn't Remove from Feeds
-**Location:** `handlers/posts.ts` delete endpoint
-**Issue:** PostDO marked deleted, KV updated, but entries NOT removed from followers' FeedDOs. Delete fan-out message sent but not processed.
-**Fix:** Implement delete_post handler in queue consumer.
+### FeedDO (one per user)
+- Personalized timeline entries: { postId, authorId, timestamp, source }
+- Max 1000 entries with 7-day retention
+- Supports chronological and ranked views
 
-### BUG-4: Feed FoF Source Never Used
-**Location:** `types/feed.ts`
-**Issue:** The `'fof'` source type defined but never populated.
-**Fix:** Implement FoF feature or remove type.
-
-### BUG-5: Profile Cache Invalidation Incomplete
-**Location:** `durable-objects/UserDO.ts:74`
-**Issue:** Only invalidates cache by handle, profile might be cached elsewhere.
-**Fix:** Clear all related cache keys.
-
-### BUG-6: Media URL Generation is Relative
-**Location:** `handlers/media.ts:25-27`
-**Issue:** Returns relative URLs which won't work for external sharing/embedding.
-**Fix:** Generate absolute URLs using request host or config.
-
-### BUG-7: Cron Handlers Missing
-**Location:** `wrangler.toml:55-58`
-**Issue:** Cron triggers defined but no `scheduled()` handler exported.
-**Fix:** Implement scheduled handler.
+### WebSocketDO (one per user)
+- Real-time notification delivery
+- Connection management
 
 ---
 
-## Security Issues
+## KV Schema
 
-### Critical
+```
+USERS_KV:
+  user:{userId}           -> { id, email, handle, passwordHash, createdAt }
+  handle:{handle}         -> userId
+  email:{email}           -> userId
+  profile:{handle}        -> Full UserProfile (cached from UserDO)
+  search:handle:{prefix}  -> string[] of userIds
 
-#### SEC-1: No Rate Limiting
-- No protection against brute force attacks on login
-- No protection against signup spam
-- No API request rate limits
-**Fix:** Add KV-based rate limiter middleware
+POSTS_KV:
+  post:{postId}           -> PostMetadata with author info embedded
+  user-posts:{userId}     -> string[] of postIds (author's post index)
+  replies:{postId}        -> string[] of reply postIds
+  search:word:{word}:{postId} -> Post search index
 
-#### SEC-2: JWT Secret Fallback Missing
-- If `JWT_SECRET` not set, middleware throws error
-- Should fail closed in production
-**Fix:** Add proper error handling and fallback for dev
+SESSIONS_KV:
+  session:{token}         -> userId
+  notifications:{userId}:* -> Notification data
 
-#### SEC-3: Session Token Not Truly Revocable
-- Stateless JWT with no blocklist
-- If token compromised, no way to revoke until expiration
-**Fix:** Document limitation or implement token blocklist
-
-### High
-
-#### SEC-4: No CSRF Protection
-- State-changing operations don't validate origin
-- Vulnerable to cross-site request forgery
-**Fix:** Add origin validation middleware
-
-#### SEC-5: Password Reset Missing
-- No password reset functionality
-- Users can't recover accounts
-**Fix:** Implement email or handle-based reset
-
-#### SEC-6: No Account Lockout
-- No lockout after failed login attempts
-- Enables brute force attacks
-**Fix:** Track failed attempts and lockout
-
-#### SEC-7: Media Upload Validation Insufficient
-- Only checks MIME type and size
-- No magic byte validation
-- No virus/malware scanning
-**Fix:** Add magic byte validation
-
-### Medium
-
-#### SEC-8: XSS Risk in Frontend
-- Inline HTML construction with template literals
-**Fix:** Use proper templating or sanitization
-
-#### SEC-9: No Input Sanitization for URLs
-- Website field accepts any URL
-- Could be used for malicious redirects
-**Fix:** Validate URL format and scheme
-
-#### SEC-10: Handle Enumeration
-- Different error messages for "email exists" vs "handle exists"
-**Fix:** Use generic error message
-
-#### SEC-11: No Audit Logging
-- No logging of security-relevant events
-**Fix:** Add audit log system
-
-#### SEC-12: CORS Too Permissive
-- Uses `cors()` with no origin restriction
-**Fix:** Configure allowed origins
+FEEDS_KV:
+  feed:{userId}           -> Cached feed entries
+  explore:ranked          -> Global explore feed cache
+```
 
 ---
 
-## Implementation Roadmap
+## API Endpoints
 
-### P0 - Immediate (Security Critical)
+### Auth (`/api/auth/`)
+- POST `/signup` - Create account
+- POST `/login` - Email/password login
+- POST `/logout` - Invalidate session
+- GET `/me` - Current user info
+- POST `/clerk-callback` - Clerk OAuth completion
+- POST `/clerk-handle` - Set handle after OAuth signup
 
-- [x] **Rate Limiting Middleware**
-  - KV-based rate limiter
-  - 5 login attempts per IP per minute
-  - 10 signups per IP per hour
-  - 100 API requests per user per minute
+### Users (`/api/users/`)
+- GET `/:handle` - Get profile
+- PATCH `/:handle` - Update profile
+- POST `/:handle/follow` - Follow user
+- DELETE `/:handle/follow` - Unfollow
+- GET `/:handle/followers` - List followers
+- GET `/:handle/following` - List following
+- POST `/:handle/block` - Block user
+- DELETE `/:handle/block` - Unblock
 
-- [x] **CSRF Protection**
-  - Origin header validation
-  - SameSite cookie configuration
+### Posts (`/api/posts/`)
+- POST `/` - Create note (280 char max)
+- GET `/:id` - Get post with thread context
+- DELETE `/:id` - Delete own post
+- POST `/:id/like` - Like
+- DELETE `/:id/like` - Unlike
+- POST `/:id/repost` - Repost
+- DELETE `/:id/repost` - Undo repost
+- GET `/:id/replies` - Get replies (paginated)
 
-- [x] **Cron Handlers**
-  - Implement `scheduled()` export
-  - FoF ranking updates (every 15 min)
-  - Feed cleanup (hourly)
-  - KV compaction (daily)
+### Feed (`/api/feed/`)
+- GET `/home` - Personalized home feed (follow + explore blend)
+- GET `/explore` - Global ranked feed
+- GET `/user/:handle` - User's posts
 
-- [x] **Fix Media Serving**
-  - Remove non-functional image resizing params
-  - Generate absolute URLs
-  - Add magic byte validation
+### Search (`/api/search/`)
+- GET `/users?q=` - Search users by handle/name
+- GET `/posts?q=` - Search posts by content
 
-### P1 - Short-term (Feature Completion)
+### Notifications (`/api/notifications/`)
+- GET `/` - List notifications (paginated)
+- POST `/read` - Mark notifications as read
+- GET `/unread-count` - Unread count
 
-- [x] **Feed Algorithm**
-  - Implement FoF post fetching
-  - Round-robin merge (2 followed + 1 FoF)
-  - Hacker News-style ranking for FoF
-
-- [x] **Moderation System**
-  - Admin roles and permissions
-  - User ban functionality
-  - Post takedown capability
-  - Global ban enforcement
-
-- [x] **Repost/Retweet**
-  - POST /api/posts/:id/repost endpoint
-  - Fan-out reposts to followers
-  - Display reposts in feed
-
-- [x] **Password Reset**
-  - Handle + email verification
-  - Time-limited reset tokens (15 min TTL)
-  - One-time use tokens
-
-- [x] **WebSocket Real-time**
-  - Implement WebSocketDO with connection management
-  - Live feed updates via WebSocket broadcasts
-  - Real-time notifications delivery
-  - Connection state management per user
-
-- [x] **Notifications System**
-  - KV-based storage with 30-day TTL
-  - @mention detection in posts
-  - Like/reply/follow/mention/repost notification triggers
-  - Notification API endpoints (fetch, mark read, unread count)
-  - Real-time notification delivery via WebSocket
-
-### P2 - Medium-term (Enhancement)
-
-- [x] **User Timeline Endpoint**
-  - GET /api/users/:handle/posts
-  - Pagination support
-  - Include replies option
-
-- [x] **Reply Thread View**
-  - GET /api/posts/:id/thread
-  - Recursive reply fetching
-  - Thread pagination
+### Media (`/api/media/`)
+- POST `/upload` - Upload image/video to R2
+- GET `/:key` - Serve media file
 
 ---
 
-## Summary
+## Feed Algorithm
 
-| Category | Complete | Partial | Missing |
-|----------|----------|---------|---------|
-| Core Infrastructure | 5 | 1 | 1 |
-| Authentication | 5 | 0 | 0 |
-| User/Profile | 11 | 1 | 2 |
-| Posts | 9 | 1 | 0 |
-| Media | 5 | 1 | 0 |
-| Feed System | 5 | 0 | 4 |
-| Fan-out | 3 | 1 | 0 |
-| Moderation | 2 | 0 | 3 |
-| Real-time | 0 | 0 | 3 |
-| Testing | 5 | 1 | 2 |
+Freshness-first ranking (Twitter-inspired):
 
-**Overall Completion: ~70%**
+```typescript
+SCORING = {
+  RECENCY_HALF_LIFE_HOURS: 3,      // Fast decay
+  ENGAGEMENT_HALF_LIFE_HOURS: 18,  // Slower engagement decay
 
-The foundation is solid, but differentiating features (smart feed algorithm, real-time, moderation) are missing. Security hardening is required before production deployment.
+  // Fresh post boosts
+  FRESH_BOOST_OWN: 40,             // Own posts boosted 20 min
+  FRESH_BOOST_FOLLOW: 20,          // Followed users boosted 30 min
+  FRESH_BOOST_EXPLORE: 6,          // Explore content boost
+
+  // Engagement weights
+  RECENCY_WEIGHT: 50,
+  ENGAGEMENT_WEIGHT: 5,
+  REPLY_WEIGHT: 4,
+  REPOST_WEIGHT: 3,
+  LIKE_WEIGHT: 1,
+
+  // Reply penalty (down-rank unless engaged)
+  REPLY_PENALTY_BASE: 25,
+  REPLY_ENGAGEMENT_THRESHOLD: 5,
+
+  // Follow vs explore blend
+  FOLLOW_RATIO_NORMAL: 0.85,
+  FOLLOW_RATIO_STALE: 0.6,         // More explore when feed is stale
+}
+```
+
+Key behaviors:
+- Own posts pinned to top for 10 minutes
+- Stale feed detection increases explore content
+- Replies penalized unless highly engaged
+
+---
+
+## Frontend (React SPA)
+
+### Tech Stack
+- Vite build system
+- React Query for server state
+- Zustand for client state (auth, theme)
+- Lucide icons
+- CSS variables for theming
+
+### Pages
+- `/` - Home feed
+- `/explore` - Explore/discover
+- `/search` - User and post search
+- `/:handle` - User profile
+- `/post/:id` - Thread view
+- `/notifications` - Notification list
+- `/settings` - User settings, theme picker, muted words
+- `/auth` - Login/signup with Clerk
+
+### Components
+- `AppLayout` - Shell with sidebar/bottom nav
+- `Sidebar` - Desktop navigation
+- `BottomNav` - Mobile navigation
+- `PostCard` - Note display with actions
+- `ComposeBox` - Note composer with media upload
+- `UserCard` - User preview
+
+### Theming (6 themes)
+```css
+/* Theme via data-theme attribute */
+[data-theme="twitter"] { --primary: #1d9bf0; }
+[data-theme="vega"]    { --primary: #8b5cf6; } /* Purple */
+[data-theme="nova"]    { --primary: #f97316; } /* Orange */
+[data-theme="maia"]    { --primary: #4299e1; } /* Soft blue - default */
+[data-theme="lyra"]    { --primary: #10b981; } /* Green */
+[data-theme="mira"]    { --primary: #ec4899; } /* Pink */
+```
+
+### Mobile-First Design
+- Responsive breakpoints
+- Touch-friendly interactions
+- Bottom navigation on mobile
+- Sidebar on desktop
+
+---
+
+## Visual Design System
+
+Create a Twitter/X-inspired design with clean typography, subtle interactions, and a multi-theme system. The aesthetic should feel professional, modern, and content-focused.
+
+### Design Philosophy
+- **Content-first**: UI recedes, content dominates
+- **Subtle depth**: Minimal shadows, rely on borders and spacing
+- **Responsive feel**: 200ms transitions, hover states everywhere
+- **Twitter precision**: Match Twitter/X spacing, sizing, and proportions
+
+### Layout Structure
+
+Three-column Twitter layout with fixed sidebar and scrolling main content:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Left Sidebar (275px)  │  Main (600px)  │  Right (350px) │
+│  ┌─────────────────┐   │  ┌──────────┐  │  ┌──────────┐  │
+│  │ Logo            │   │  │ Header   │  │  │ Search   │  │
+│  │ Home            │   │  │ Compose  │  │  │ Widgets  │  │
+│  │ Explore         │   │  │ Posts... │  │  │ Trends   │  │
+│  │ Notifications   │   │  │          │  │  │ Who to   │  │
+│  │ Profile         │   │  │          │  │  │ follow   │  │
+│  │ Settings        │   │  │          │  │  └──────────┘  │
+│  │ [Post Button]   │   │  │          │  │                │
+│  └─────────────────┘   │  └──────────┘  │                │
+└─────────────────────────────────────────────────────────┘
+```
+
+Responsive behavior:
+- `>1024px`: Full 3-column layout
+- `768-1024px`: Hide right sidebar
+- `<768px`: Hide left sidebar, show bottom navigation
+
+### CSS Variables (Design Tokens)
+
+All colors, spacing, and radii defined as CSS variables for theming:
+
+```css
+:root {
+  /* Core colors */
+  --background: #000000;
+  --foreground: #E7E9EA;
+  --muted: #71767B;
+  --muted-foreground: #71767B;
+  --border: #2F3336;
+  --primary: #1D9BF0;
+  --primary-foreground: #FFFFFF;
+  --secondary: #16181C;
+  --hover: #16181C;
+
+  /* Semantic colors */
+  --destructive: #F4212E;
+  --success: #00BA7C;
+  --like: #F91880;        /* Pink for likes */
+  --repost: #00BA7C;      /* Green for reposts */
+
+  /* Border radii */
+  --radius: 16px;         /* Cards, media */
+  --radius-sm: 8px;       /* Buttons, inputs */
+  --radius-lg: 9999px;    /* Pills, avatars */
+
+  /* Layout widths */
+  --sidebar-left-width: 275px;
+  --main-content-width: 600px;
+  --sidebar-right-width: 350px;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'SF Mono', Monaco, Consolas, monospace;
+
+  /* Transitions */
+  --transition: all 0.2s ease;
+}
+```
+
+### 6 Theme Variants
+
+Each theme has a distinct personality through colors, radii, and spacing:
+
+| Theme | Background | Primary | Border Radius | Character |
+|-------|------------|---------|---------------|-----------|
+| **twitter** | `#000000` (black) | `#1D9BF0` (blue) | 16px | Classic Twitter dark mode |
+| **vega** | `#FFFFFF` (white) | `#0F172A` (slate) | 8px | Clean shadcn/ui light |
+| **nova** | `#FAFAFA` (neutral) | `#18181B` (zinc) | 6px | Compact, smaller spacing |
+| **maia** | `#FEFEFE` (warm white) | `#4299E1` (sky) | 16px | Soft, rounded, friendly |
+| **lyra** | `#FFFFFF` (white) | `#000000` (black) | 2px | Boxy, monospace font |
+| **mira** | `#FCFCFC` (gray) | `#2563EB` (blue) | 4px | Ultra-dense, minimal |
+
+Theme applied via `data-theme` attribute on `<html>`:
+```html
+<html data-theme="maia">
+```
+
+### Typography Scale
+
+Base: 15px / 20px line-height (Twitter standard)
+
+| Element | Size | Weight | Color |
+|---------|------|--------|-------|
+| Post content | 15px | 400 | `--foreground` |
+| Display name | 15px | 700 | `--foreground` |
+| Handle | 15px | 400 | `--muted-foreground` |
+| Timestamp | 15px | 400 | `--muted-foreground` |
+| Page header | 20px | 800 | `--foreground` |
+| Nav items | 20px | 400 (700 active) | `--foreground` |
+| Buttons | 15-17px | 700 | varies |
+
+### Component Patterns
+
+**Post Card**
+```
+┌────────────────────────────────────────────┐
+│ [Avatar] Display Name @handle · 2h        ⋯│
+│          Post content goes here with       │
+│          links and @mentions highlighted   │
+│          ┌──────────────────────────────┐  │
+│          │ [Media/Link Card Preview]    │  │
+│          └──────────────────────────────┘  │
+│          💬 12    🔁 5    ❤️ 42            │
+└────────────────────────────────────────────┘
+```
+
+Spacing: 12px padding, 12px gap between avatar and content
+Avatar: 48px circle (40px in compact themes)
+
+**Action buttons**
+- Default: `--muted-foreground`
+- Hover: `--primary` with `--accent` background
+- Liked: `--like` (#F91880) with filled heart
+- Reposted: `--repost` (#00BA7C)
+
+**Avatars**
+- Standard: 48px, border-radius: 50%
+- Small: 32px (in replies, notifications)
+- Large: 134px (profile page, with 4px border)
+
+**Buttons**
+```css
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: var(--radius-lg);  /* pill shape */
+  padding: 8px 16px;
+  font-weight: 700;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+```
+
+### Interaction States
+
+All interactive elements have:
+1. **Hover**: Subtle background change (`--hover`)
+2. **Active**: Scale or opacity reduction
+3. **Focus**: 2px outline in `--primary`
+4. **Disabled**: 50% opacity, `cursor: not-allowed`
+
+Transitions: 200ms ease for all state changes
+
+### Link Cards (URL Previews)
+
+Twitter/X-style rich link previews:
+```
+┌────────────────────────────────────────┐
+│ [Large image preview - 16:9 ratio]     │
+├────────────────────────────────────────┤
+│ 🔗 example.com                         │
+│ Article Title Here                      │
+│ Brief description of the linked...     │
+└────────────────────────────────────────┘
+```
+
+- Border: 1px solid `--border`
+- Border-radius: 16px
+- Image: aspect-ratio 1.91:1
+- YouTube embeds: Full 16:9 iframe
+
+### Mobile Navigation
+
+Bottom nav bar (53px height) with 5 items:
+```
+┌─────────────────────────────────────────┐
+│  🏠      🔍      🔔      👤      ⚙️      │
+└─────────────────────────────────────────┘
+```
+
+- Fixed to bottom with `safe-area-inset-bottom` for notched phones
+- Icon size: 26px
+- Notification badge: Primary-colored pill
+
+### Page Header (Sticky)
+
+```css
+.page-header {
+  position: sticky;
+  top: 0;
+  height: 53px;
+  background: rgba(0, 0, 0, 0.65);  /* Twitter theme */
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+```
+
+Light themes: Solid background, no blur
+
+### Empty States
+
+Centered, muted text with subtle messaging:
+```
+┌────────────────────────────────────────┐
+│                                        │
+│         No posts yet                   │
+│         When you post, it'll show here │
+│                                        │
+└────────────────────────────────────────┘
+```
+
+### Media Display
+
+- Images: 16px border-radius, max-height 500px, object-fit cover
+- Click to open modal (zoom-out cursor)
+- Video: Native controls, same styling
+- Multi-image: Grid layout (2x2 for 4 images)
+
+### Compose Box
+
+```
+┌────────────────────────────────────────┐
+│ [Avatar] What's happening?             │
+│                                        │
+│                                        │
+├────────────────────────────────────────┤
+│ 🖼️ 📹        [Character count]  [Post] │
+└────────────────────────────────────────┘
+```
+
+- Textarea: No border, transparent background, 20px font
+- Footer: Thin top border, media buttons left, post button right
+- Character counter: Warning at 260 (yellow), error at 280 (red)
+
+### Animations
+
+```css
+/* Smooth global transitions */
+* {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.3s;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+}
+```
+
+### Icons
+
+Use Lucide React icons throughout:
+- Size: 18-26px depending on context
+- Stroke width: 2
+- Color: `currentColor` (inherits from parent)
+
+Key icons:
+- Home, Search, Bell, User, Settings (navigation)
+- Heart, MessageSquare, Repeat2, MoreHorizontal (post actions)
+- Camera, Image, X (media/modals)
+
+---
+
+## AI News Seeder System
+
+Automated content generation for community bootstrapping:
+
+### News Aggregator (`/src/services/news-aggregator.ts`)
+Fetch AI/ML news from RSS feeds:
+- Simon Willison's blog
+- Anthropic blog
+- Google AI blog
+- Hugging Face blog
+- Lobsters (AI tag)
+- Hacker News (AI keywords, min 50 points)
+
+### Story Processor (`/src/services/story-processor.ts`)
+Use Claude to analyze stories:
+- Extract summary, significance, talking points
+- Score debate potential (1-10)
+- Match to best personas
+
+### Conversation Generator (`/src/services/conversation-generator.ts`)
+Generate authentic discussions:
+- Select lead persona based on story topic
+- Generate lead post with URL
+- Generate 4-6 replies with threading
+- Add realistic likes (5-15 on lead, 0-5 on replies)
+- Stagger timestamps realistically
+
+### 20 Seed Personas
+Each with distinct voice, expertise domains, and AI company affiliations:
+- Emma Williams (Anthropic, AI safety)
+- Olivia Brown (OpenAI, NLP research)
+- Sarah Chen (DeepMind, Gemini)
+- Alex Thompson (Claude Code, indie dev)
+- Kevin Jackson (Cursor, dev tools)
+- Ben Harris (Aider, CLI tools)
+- Amelia Smith (Tech journalism)
+- Daniel Kim (NVIDIA, GPUs)
+- ... and 12 more covering diverse AI perspectives
+
+### Endpoints
+- `POST /debug/news/fetch` - Fetch without posting
+- `POST /debug/news/process` - Analyze without posting
+- `POST /debug/news/generate` - Full run: fetch → analyze → post → engage
+- `POST /debug/generate-conversations` - Generate replies for existing posts
+
+---
+
+## Batching & Performance
+
+### Critical: Avoid N+1 Queries
+```typescript
+// BAD - sequential reads
+for (const id of userIds) {
+  await env.USERS_KV.get(`user:${id}`); // N requests!
+}
+
+// GOOD - parallel batch reads
+const keys = userIds.map(id => `user:${id}`);
+const userMap = await batchKVGet(env, keys, 'USERS_KV', { parse: JSON.parse });
+```
+
+### Cloudflare Limits
+- Concurrent subrequests: 6 (batchKVGet auto-chunks)
+- Total subrequests: 1000 per request
+- KV value size: 25MB
+- DO request timeout: 30s
+
+---
+
+## Queue Fanout
+
+On post creation:
+```typescript
+await env.FANOUT_QUEUE.send({
+  type: 'new_post',
+  postId,
+  authorId,
+  timestamp
+});
+```
+
+Queue consumer adds post to each follower's FeedDO.
+
+---
+
+## Moderation
+
+- User bans (soft-delete, can be reversed)
+- Post takedowns with reason
+- Block lists enforced at read time
+- Muted words filter at feed render time
+- Admin endpoints for management
+
+---
+
+## WebSocket Real-Time
+
+- Notifications pushed instantly
+- New follower alerts
+- Like/reply notifications
+- Connection via `/api/ws`
+
+---
+
+## Development
+
+```bash
+npm run dev          # Start dev server on localhost:8080
+npm run typecheck    # TypeScript validation
+npm test             # Unit tests
+npm run test:api     # API integration tests
+npm run deploy       # Deploy to Cloudflare
+```
+
+---
+
+## File Structure
+
+```
+src/
+├── index.ts                 # Worker entry, routes, queue consumer
+├── constants.ts             # Limits, TTLs, scoring params
+├── durable-objects/         # UserDO, PostDO, FeedDO, WebSocketDO
+├── handlers/                # API route handlers
+├── middleware/              # Auth, CSRF, rate-limit
+├── services/                # News aggregator, story processor, conversation generator
+├── types/                   # TypeScript interfaces
+└── utils/                   # Batch, crypto, JWT, search index
+
+web/
+├── src/
+│   ├── App.tsx              # Router
+│   ├── components/          # Layout, posts, users
+│   ├── pages/               # Route components
+│   ├── lib/                 # API client, React Query
+│   └── stores/              # Zustand (auth, theme)
+└── index.html
+```
+
+---
+
+## Success Criteria
+
+- <50ms p95 read latency per region
+- No centralized DB calls
+- Fan-out completion within seconds
+- Feature parity: profiles, follows, timelines, likes, replies, reposts, media, search, notifications, moderation
+- Mobile-responsive SPA with theme customization
+- AI-powered content seeding for community bootstrapping

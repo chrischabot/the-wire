@@ -1162,19 +1162,18 @@ feed.get("/home-legacy", requireAuth, async (c) => {
 
 function calculateHNScore(post: PostMetadata): number {
   const ageHours = (Date.now() - post.createdAt) / (1000 * 60 * 60);
-  const recency = Math.exp((-LN2 * ageHours) / SCORING.RECENCY_HALF_LIFE_HOURS);
+  // Use 24-hour half-life for explore feed so newer posts don't decay too fast
+  const EXPLORE_RECENCY_HALF_LIFE = 24;
+  const recency = Math.exp((-LN2 * ageHours) / EXPLORE_RECENCY_HALF_LIFE);
   const engagement =
-    post.likeCount * SCORING.LIKE_WEIGHT +
-    post.replyCount * SCORING.REPLY_WEIGHT +
-    post.repostCount * SCORING.REPOST_WEIGHT;
+    (post.likeCount || 0) * SCORING.LIKE_WEIGHT +
+    (post.replyCount || 0) * SCORING.REPLY_WEIGHT +
+    (post.repostCount || 0) * SCORING.REPOST_WEIGHT;
   const engScore = Math.log1p(engagement);
-  const engDecay = Math.exp(
-    (-LN2 * ageHours) / SCORING.ENGAGEMENT_HALF_LIFE_HOURS,
-  );
-  return (
-    SCORING.RECENCY_WEIGHT * recency +
-    SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay
-  );
+  // Engagement decays slower - 48 hour half-life
+  const engDecay = Math.exp((-LN2 * ageHours) / 48);
+  // Recency dominates: 100 weight vs 10 for engagement
+  return 100 * recency + 10 * engScore * engDecay;
 }
 
 /**
@@ -1270,74 +1269,56 @@ feed.get("/global", async (c) => {
       }
     }
 
-    let cachedData = await c.env.FEEDS_KV.get("explore:ranked");
-    if (!cachedData) {
-      cachedData = await c.env.FEEDS_KV.get("explore:ranked:previous");
-    }
-
-    if (cachedData) {
-      // Use cached post data but ALWAYS re-score at read time for freshness
-      const parsedPosts = safeJsonParse<PostMetadata[]>(cachedData);
-      if (!parsedPosts) {
-        return serverError("Error parsing cached data");
-      }
-      let cachedPosts = parsedPosts;
-
-      // Filter out blocked users and deleted posts
-      if (blockedUserIds.length > 0) {
-        const blockedSet = new Set(blockedUserIds);
-        cachedPosts = cachedPosts.filter((p) => !blockedSet.has(p.authorId));
-      }
-      cachedPosts = cachedPosts.filter((p) => !p.isDeleted && !p.isTakenDown);
-
-      // RE-SCORE at read time to ensure fresh posts bubble up
-      // The cron caches posts, but scores must be recalculated for accurate ranking
-      const scoredCached = cachedPosts.map((post) => ({
-        post,
-        score: calculateHNScore(post),
-      }));
-      scoredCached.sort((a, b) => b.score - a.score);
-
-      // Apply author diversity after re-scoring
-      const diverseCached = applyAuthorDiversity(scoredCached.map((sp) => sp.post));
-
-      const paginatedCached = diverseCached.slice(offset, offset + limit);
-      const hasMore = offset + limit < diverseCached.length;
-      const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
-
-      const response = success({
-        items: paginatedCached,
-        nextCursor,
-        hasMore,
-      });
-      setCachedResponse(cacheKey, response.clone(), c.executionCtx);
-      return response;
-    }
-
-    // Fallback: compute on-demand (cache miss or first deploy)
+    // Compute fresh rankings using user-posts indices (more reliable than KV list)
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const blockedSet = new Set(blockedUserIds);
 
-    // List keys first, then batch fetch
-    const allKeys: string[] = [];
-    let postCursor: string | undefined;
-    const maxBatches = 5;
-    let batchCount = 0;
-
-    while (batchCount < maxBatches) {
-      const listResult = await c.env.POSTS_KV.list({
-        prefix: "post:",
-        limit: BATCH_SIZE.KV_LIST,
-        ...(postCursor ? { cursor: postCursor } : {}),
+    // Step 1: Get all user handles to find their posts
+    const handleKeys: string[] = [];
+    let handleCursor: string | undefined;
+    let handleBatches = 0;
+    while (handleBatches < 10) {
+      const listResult = await c.env.USERS_KV.list({
+        prefix: "handle:",
+        limit: 100,
+        ...(handleCursor ? { cursor: handleCursor } : {}),
       });
-      batchCount++;
-      allKeys.push(...listResult.keys.map((k) => k.name));
+      handleBatches++;
+      handleKeys.push(...listResult.keys.map((k) => k.name.replace("handle:", "")));
       if (listResult.list_complete) break;
-      postCursor = listResult.cursor;
+      handleCursor = listResult.cursor;
     }
 
-    // Batch fetch all posts at once
-    const postMap = await batchKVGet<PostMetadata>(c.env, allKeys, "POSTS_KV", {
+    // Step 2: Get user IDs from handles
+    const handleToIdKeys = handleKeys.map((h) => `handle:${h}`);
+    const handleToIdMap = await batchKVGet<string>(c.env, handleToIdKeys, "USERS_KV", {
+      parse: (v) => v || null,
+    });
+
+    const userIds: string[] = [];
+    for (const [, uid] of handleToIdMap) {
+      if (uid) userIds.push(uid);
+    }
+
+    // Step 3: Get user-posts indices for all users
+    const userPostIndexKeys = userIds.map((uid) => `user-posts:${uid}`);
+    const userPostIndexMap = await batchKVGet<string[]>(c.env, userPostIndexKeys, "POSTS_KV", {
+      parse: (v) => (v ? safeJsonParse<string[]>(v) : null),
+    });
+
+    // Step 4: Collect recent post IDs (limit per user for fairness)
+    const postIdsToFetch = new Set<string>();
+    const MAX_POSTS_PER_USER = 10;
+    for (const [, postIds] of userPostIndexMap) {
+      if (!postIds) continue;
+      for (const postId of postIds.slice(0, MAX_POSTS_PER_USER)) {
+        postIdsToFetch.add(postId);
+      }
+    }
+
+    // Step 5: Batch fetch all posts
+    const postKeys = [...postIdsToFetch].map((id) => `post:${id}`);
+    const postMap = await batchKVGet<PostMetadata>(c.env, postKeys, "POSTS_KV", {
       parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null),
     });
 
