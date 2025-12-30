@@ -168,6 +168,7 @@ export function ProfilePage() {
   const navigate = useNavigate();
   const { handle } = useParams<{ handle: string }>();
   const currentUser = useAuthStore((s) => s.user);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"posts" | "replies" | "media">(
     "posts",
@@ -175,7 +176,7 @@ export function ProfilePage() {
   const [modalImage, setModalImage] = useState<string | null>(null);
 
   const isOwnProfile =
-    currentUser?.handle?.toLowerCase() === handle?.toLowerCase();
+    isAuthenticated && currentUser?.handle?.toLowerCase() === handle?.toLowerCase();
 
   const { data: profileData, isLoading: profileLoading } = useQuery({
     queryKey: ["profile", handle],
@@ -380,7 +381,7 @@ export function ProfilePage() {
                 >
                   Edit profile
                 </button>
-              ) : (
+              ) : isAuthenticated ? (
                 <button
                   style={
                     profile.isFollowing
@@ -395,6 +396,13 @@ export function ProfilePage() {
                     : profile.isFollowing
                       ? "Following"
                       : "Follow"}
+                </button>
+              ) : (
+                <button
+                  style={styles.btnPrimary}
+                  onClick={() => navigate("/auth")}
+                >
+                  Follow
                 </button>
               )}
             </div>

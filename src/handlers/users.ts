@@ -941,38 +941,49 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
   const authorPostsKey = `user-posts:${userId}`;
   const indexData = await c.env.POSTS_KV.get(authorPostsKey);
 
+  let nextOffset = offset;
+
   if (indexData) {
     // Fast path: fetch posts from index
     const postIds = safeJsonParse<string[]>(indexData);
     if (!postIds) {
       return c.json({ success: false, error: "Error parsing index data" }, 500);
     }
-    const relevantIds = postIds.slice(offset, offset + limit * 2); // Fetch extra for filtering
 
-    const fetchedPosts = await Promise.all(
-      relevantIds.map(async (postId) => {
-        const postData = await c.env.POSTS_KV.get(`post:${postId}`);
-        if (!postData) return null;
-        const post = safeJsonParse<PostMetadata>(postData);
-        if (!post) return null;
-        if (post.isDeleted || post.isTakenDown) return null;
-        if (!includeReplies && post.replyToId) return null;
-        return post;
-      }),
-    );
-
-    for (const post of fetchedPosts) {
-      if (post && posts.length < limit) {
-        posts.push(post);
+    // Iterate through posts starting at offset, tracking position
+    for (let i = offset; i < postIds.length && posts.length < limit; i++) {
+      const postId = postIds[i];
+      const postData = await c.env.POSTS_KV.get(`post:${postId}`);
+      if (!postData) {
+        nextOffset = i + 1;
+        continue;
       }
+      const post = safeJsonParse<PostMetadata>(postData);
+      if (!post) {
+        nextOffset = i + 1;
+        continue;
+      }
+      if (post.isDeleted || post.isTakenDown) {
+        nextOffset = i + 1;
+        continue;
+      }
+      if (!includeReplies && post.replyToId) {
+        nextOffset = i + 1;
+        continue;
+      }
+      posts.push(post);
+      nextOffset = i + 1;
     }
   } else {
     // Fallback: scan all posts (for users without index yet)
+    // Collect all matching posts first, then paginate
+    const allUserPosts: PostMetadata[] = [];
     let postCursor: string | undefined;
     let scannedBatches = 0;
-    const maxBatches = 10;
+    const maxBatches = 20;
 
-    while (posts.length < limit && scannedBatches < maxBatches) {
+    // Collect enough posts to satisfy pagination (offset + limit)
+    while (allUserPosts.length < offset + limit + 1 && scannedBatches < maxBatches) {
       const listResult = await c.env.POSTS_KV.list({
         prefix: "post:",
         limit: BATCH_SIZE.KV_LIST,
@@ -981,14 +992,13 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
       scannedBatches++;
 
       for (const key of listResult.keys) {
-        if (posts.length >= limit) break;
         const postData = await c.env.POSTS_KV.get(key.name);
         if (!postData) continue;
         const post = safeJsonParse<PostMetadata>(postData);
         if (!post) continue;
         if (post.authorId === userId && !post.isDeleted && !post.isTakenDown) {
           if (includeReplies || !post.replyToId) {
-            posts.push(post);
+            allUserPosts.push(post);
           }
         }
       }
@@ -997,7 +1007,15 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
       postCursor = listResult.cursor;
     }
 
-    posts.sort((a, b) => b.createdAt - a.createdAt);
+    // Sort by creation time (newest first)
+    allUserPosts.sort((a, b) => b.createdAt - a.createdAt);
+
+    // Apply pagination
+    const paginatedPosts = allUserPosts.slice(offset, offset + limit);
+    posts.push(...paginatedPosts);
+
+    // Update nextOffset for cursor calculation
+    nextOffset = offset + posts.length;
   }
 
   // Enrich reposts with fresh originalPost data (counts, createdAt)
@@ -1036,7 +1054,8 @@ users.get("/:handle/posts", optionalAuth, async (c) => {
   // Return posts without hasLiked status - client can fetch lazily if needed
   // This avoids expensive DO calls for each post (stays under subrequest limits)
   const hasMore = posts.length >= limit;
-  const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
+  // Use nextOffset which tracks actual position in the index after filtering
+  const nextCursor = hasMore ? btoa(String(nextOffset)) : null;
 
   return c.json({
     success: true,

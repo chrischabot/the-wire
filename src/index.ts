@@ -29,6 +29,13 @@ import { getStyles } from "./styles";
 import { getClientJS } from "./client-js";
 import { getLandingPage } from "./pages/landing";
 import { initLogger, logger } from "./utils/logger";
+import {
+  generateProfileMeta,
+  generatePostMeta,
+  generateExploreMeta,
+  generateDefaultMeta,
+  injectMetaTags,
+} from "./ssr/meta";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -110,6 +117,22 @@ async function serveSPA(c: import("hono").Context<{ Bindings: Env }>) {
   return c.html(html);
 }
 
+async function serveSPAWithMeta(
+  c: import("hono").Context<{ Bindings: Env }>,
+  meta: import("./ssr/meta").MetaTags | null
+) {
+  const spaResponse = await c.env.ASSETS.fetch(
+    new Request("https://assets/index.html"),
+  );
+  let html = await spaResponse.text();
+
+  // Inject meta tags if available, otherwise use defaults
+  const metaTags = meta || generateDefaultMeta();
+  html = injectMetaTags(html, metaTags);
+
+  return c.html(html);
+}
+
 app.get("/signup", (c) => serveSPA(c));
 app.get("/login", (c) => serveSPA(c));
 app.get("/auth", (c) => serveSPA(c));
@@ -119,15 +142,40 @@ app.get("/onboarding", (c) => serveSPA(c));
 app.get("/onboarding/*", (c) => serveSPA(c));
 app.get("/home", (c) => serveSPA(c));
 app.get("/search", (c) => serveSPA(c));
-app.get("/explore", (c) => serveSPA(c));
 app.get("/notifications", (c) => serveSPA(c));
-app.get("/post/:id", (c) => serveSPA(c));
 app.get("/settings", (c) => serveSPA(c));
 app.get("/settings/muted", (c) => serveSPA(c));
 app.get("/admin", (c) => serveSPA(c));
-app.get("/u/:handle", (c) => serveSPA(c));
-app.get("/u/:handle/followers", (c) => serveSPA(c));
-app.get("/u/:handle/following", (c) => serveSPA(c));
+
+// Public pages with SSR meta tags for SEO
+app.get("/explore", async (c) => {
+  const meta = generateExploreMeta();
+  return serveSPAWithMeta(c, meta);
+});
+
+app.get("/post/:id", async (c) => {
+  const postId = c.req.param("id");
+  const meta = await generatePostMeta(postId, c.env);
+  return serveSPAWithMeta(c, meta);
+});
+
+app.get("/u/:handle", async (c) => {
+  const handle = c.req.param("handle");
+  const meta = await generateProfileMeta(handle, c.env);
+  return serveSPAWithMeta(c, meta);
+});
+
+app.get("/u/:handle/followers", async (c) => {
+  const handle = c.req.param("handle");
+  const meta = await generateProfileMeta(handle, c.env);
+  return serveSPAWithMeta(c, meta);
+});
+
+app.get("/u/:handle/following", async (c) => {
+  const handle = c.req.param("handle");
+  const meta = await generateProfileMeta(handle, c.env);
+  return serveSPAWithMeta(c, meta);
+});
 
 // API version info
 app.get("/api", (c) => {

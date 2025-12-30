@@ -285,12 +285,21 @@ export const PostCard = memo(function PostCard({
   const hasMedia = displayPost.mediaUrls && displayPost.mediaUrls.length > 0;
   const showLinkCard = firstUrl && !hasMedia && !isPureRepost;
 
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+
   const handleCardClick = () => {
     navigate(`/post/${isPureRepost ? displayPost.id : post.id}`);
   };
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
+
+    // Redirect to auth if not logged in
+    if (!isAuthenticated) {
+      navigate("/auth");
+      return;
+    }
+
     const wasLiked = isLiked;
     setIsLiked(!wasLiked);
     setLikeCount((c) => (wasLiked ? c - 1 : c + 1));
@@ -309,6 +318,13 @@ export const PostCard = memo(function PostCard({
 
   const handleRepost = async (e: React.MouseEvent) => {
     e.stopPropagation();
+
+    // Redirect to auth if not logged in
+    if (!isAuthenticated) {
+      navigate("/auth");
+      return;
+    }
+
     const wasReposted = isReposted;
     setIsReposted(!wasReposted);
     setRepostCount((c) => (wasReposted ? c - 1 : c + 1));
@@ -327,6 +343,13 @@ export const PostCard = memo(function PostCard({
 
   const handleReply = (e: React.MouseEvent) => {
     e.stopPropagation();
+
+    // Redirect to auth if not logged in
+    if (!isAuthenticated) {
+      navigate("/auth");
+      return;
+    }
+
     navigate(`/post/${displayPost.id}?reply=true`);
   };
 
@@ -376,11 +399,31 @@ export const PostCard = memo(function PostCard({
     setMenuOpen(false);
   };
 
+  const isReply = !!displayPost.replyToId && !isPureRepost;
+
   return (
     <>
       {isPureRepost && (
         <div className="repost-indicator">
           <Repeat2 size={14} /> {post.authorDisplayName} reposted
+        </div>
+      )}
+      {isReply && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-start",
+            paddingLeft: "39px",
+            height: "12px",
+          }}
+        >
+          <div
+            style={{
+              width: "2px",
+              height: "100%",
+              backgroundColor: "var(--border)",
+            }}
+          />
         </div>
       )}
       <div
@@ -393,6 +436,7 @@ export const PostCard = memo(function PostCard({
           <Link
             to={`/u/${displayPost.authorHandle}`}
             onClick={(e) => e.stopPropagation()}
+            style={{ flexShrink: 0 }}
           >
             {displayPost.authorAvatarUrl ? (
               <img
@@ -481,7 +525,7 @@ export const PostCard = memo(function PostCard({
                 </span>
               </div>
 
-              {showMenu && (
+              {showMenu && isAuthenticated && (
                 <div className="post-menu-container" style={{ flexShrink: 0 }}>
                   <button
                     className="post-more-btn"

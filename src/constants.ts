@@ -103,6 +103,10 @@ export const SCORING = {
   /** Own post pin threshold - posts newer than this are pinned to top (ms) */
   OWN_POST_PIN_THRESHOLD_MS: 10 * 60 * 1000, // 10 minutes
 
+  /** Reply penalty - down-rank replies in feeds unless highly engaged */
+  REPLY_PENALTY_BASE: 25, // Base penalty for replies appearing in feeds
+  REPLY_ENGAGEMENT_THRESHOLD: 5, // Engagement threshold to waive penalty (likes + replies + reposts)
+
   /** Stale feed threshold - if fewer than this % of posts are recent, increase explore */
   STALE_FEED_RECENT_HOURS: 2,
   STALE_FEED_MIN_RECENT_RATIO: 0.33,

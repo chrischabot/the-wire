@@ -44,6 +44,34 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Helper hook to check if user is authenticated
+ */
+export function useIsAuthenticated() {
+  const { isLoaded, isSignedIn } = useAuth();
+  const user = useAuthStore((s) => s.user);
+  const linkStatus = useAuthStore((s) => s.linkStatus);
+  const legacyToken = useAuthStore((s) => s.token);
+
+  if (!isLoaded) return { isLoaded: false, isAuthenticated: false };
+
+  const isClerkAuth = isSignedIn && linkStatus === "linked" && user;
+  const isLegacyAuth = !!legacyToken && !!user;
+
+  return { isLoaded: true, isAuthenticated: isClerkAuth || isLegacyAuth };
+}
+
+/**
+ * Smart redirect for root path - authenticated users go to /home, others to /explore
+ */
+function RootRedirect() {
+  const { isLoaded, isAuthenticated } = useIsAuthenticated();
+
+  if (!isLoaded) return null;
+
+  return <Navigate to={isAuthenticated ? "/home" : "/explore"} replace />;
+}
+
 function ClerkTokenBridge() {
   const { getToken } = useAuth();
 
@@ -61,7 +89,7 @@ export function App() {
     <>
       <ClerkTokenBridge />
       <Routes>
-        <Route path="/" element={<Navigate to="/home" replace />} />
+        <Route path="/" element={<RootRedirect />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/post-auth" element={<PostAuthPage />} />
         <Route path="/onboarding/handle" element={<HandleOnboardingPage />} />
@@ -75,14 +103,8 @@ export function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/explore"
-          element={
-            <ProtectedRoute>
-              <ExplorePage />
-            </ProtectedRoute>
-          }
-        />
+        {/* Explore is public - accessible without authentication */}
+        <Route path="/explore" element={<ExplorePage />} />
         <Route
           path="/notifications"
           element={

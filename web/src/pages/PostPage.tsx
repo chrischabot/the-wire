@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import {
   useQuery,
   useInfiniteQuery,
@@ -9,6 +9,7 @@ import { AppLayout } from "../components/layout";
 import { PostCard, ComposeBox } from "../components/posts";
 import type { ComposeBoxRef } from "../components/posts";
 import { postsApi } from "../lib/api";
+import { useAuthStore } from "../stores/authStore";
 
 const styles = {
   postDetail: {
@@ -56,6 +57,7 @@ export function PostPage() {
   const shouldFocusReply = searchParams.get("reply") === "true";
   const composeRef = useRef<ComposeBoxRef>(null);
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
 
   const {
     data: postData,
@@ -170,13 +172,32 @@ export function PostPage() {
       <div style={styles.postDetail}>
         <PostCard post={post} showMenu={true} showActions={true} />
 
-        <ComposeBox
-          ref={composeRef}
-          placeholder={`Reply to @${post.authorHandle}...`}
-          replyToId={post.id}
-          onPostCreated={handleReplyCreated}
-          variant="reply"
-        />
+        {isAuthenticated ? (
+          <ComposeBox
+            ref={composeRef}
+            placeholder={`Reply to @${post.authorHandle}...`}
+            replyToId={post.id}
+            onPostCreated={handleReplyCreated}
+            variant="reply"
+          />
+        ) : (
+          <div
+            style={{
+              padding: "16px",
+              textAlign: "center",
+              borderTop: "1px solid var(--border)",
+              color: "var(--muted-foreground)",
+            }}
+          >
+            <Link
+              to="/auth"
+              style={{ color: "var(--primary)", textDecoration: "none" }}
+            >
+              Sign in
+            </Link>{" "}
+            to reply to this post
+          </div>
+        )}
       </div>
 
       <div style={styles.repliesHeader}>
@@ -188,7 +209,19 @@ export function PostPage() {
         {isLoadingReplies ? (
           <div style={styles.emptyState}>Loading replies...</div>
         ) : replies.length === 0 ? (
-          <div style={styles.emptyState}>No replies yet. Be the first!</div>
+          <div style={styles.emptyState}>
+            No replies yet.{" "}
+            {isAuthenticated ? (
+              "Be the first!"
+            ) : (
+              <Link
+                to="/auth"
+                style={{ color: "var(--primary)", textDecoration: "none" }}
+              >
+                Sign in to reply
+              </Link>
+            )}
+          </div>
         ) : (
           replies.map((reply) => <PostCard key={reply.id} post={reply} />)
         )}

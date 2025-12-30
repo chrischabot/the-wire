@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Home, Search, Bell, User, Settings, Shield } from "lucide-react";
+import { Home, Search, Bell, User, Settings, Shield, LogIn } from "lucide-react";
 import { useAuthStore } from "../../stores/authStore";
 import { notificationsApi } from "../../lib/api";
 
@@ -31,6 +31,36 @@ export function Sidebar({
   const isActive = (path: string) =>
     location.pathname === path ? " active" : "";
 
+  // Logged-out sidebar - minimal navigation with sign in
+  if (!isAuthenticated) {
+    return (
+      <div className="sidebar-left">
+        <Link to="/explore" className="logo">
+          <span className="logo-text">The Wire</span>
+        </Link>
+
+        <Link to="/explore" className={`nav-item${isActive("/explore")}`}>
+          <Search size={24} />
+          <span>Explore</span>
+        </Link>
+
+        <Link to="/auth" className="nav-item">
+          <LogIn size={24} />
+          <span>Sign In</span>
+        </Link>
+
+        <Link
+          to="/auth"
+          className="post-button"
+          style={{ textDecoration: "none", textAlign: "center" }}
+        >
+          Sign Up
+        </Link>
+      </div>
+    );
+  }
+
+  // Logged-in sidebar - full navigation
   return (
     <div className="sidebar-left">
       <Link to="/home" className="logo">
@@ -75,7 +105,7 @@ export function Sidebar({
       </Link>
 
       <Link
-        to={user ? `/u/${user.handle}` : "#"}
+        to={`/u/${user.handle}`}
         className={`nav-item${isActive(`/u/${user?.handle}`)}`}
         id="profile-nav"
       >

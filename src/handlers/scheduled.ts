@@ -108,6 +108,10 @@ async function updateFoFRankings(env: Env): Promise<void> {
         const recency = Math.exp(
           (-LN2 * ageHours) / SCORING.RECENCY_HALF_LIFE_HOURS,
         );
+        const totalEngagement =
+          (post.likeCount || 0) +
+          (post.replyCount || 0) +
+          (post.repostCount || 0);
         const engagement =
           post.likeCount * SCORING.LIKE_WEIGHT +
           post.replyCount * SCORING.REPLY_WEIGHT +
@@ -116,9 +120,20 @@ async function updateFoFRankings(env: Env): Promise<void> {
         const engDecay = Math.exp(
           (-LN2 * ageHours) / SCORING.ENGAGEMENT_HALF_LIFE_HOURS,
         );
+
+        let replyPenalty = 0;
+        if (post.replyToId) {
+          const engagementRatio = Math.min(
+            1,
+            totalEngagement / SCORING.REPLY_ENGAGEMENT_THRESHOLD,
+          );
+          replyPenalty = SCORING.REPLY_PENALTY_BASE * (1 - engagementRatio);
+        }
+
         const score =
           SCORING.RECENCY_WEIGHT * recency +
-          SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay;
+          SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay -
+          replyPenalty;
 
         rankedPosts.push({
           postId: post.id,
@@ -195,6 +210,10 @@ async function updateExploreRankings(env: Env): Promise<void> {
         const recency = Math.exp(
           (-LN2 * ageHours) / SCORING.RECENCY_HALF_LIFE_HOURS,
         );
+        const totalEngagement =
+          (post.likeCount || 0) +
+          (post.replyCount || 0) +
+          (post.repostCount || 0);
         const engagement =
           (post.likeCount || 0) * SCORING.LIKE_WEIGHT +
           (post.replyCount || 0) * SCORING.REPLY_WEIGHT +
@@ -203,9 +222,20 @@ async function updateExploreRankings(env: Env): Promise<void> {
         const engDecay = Math.exp(
           (-LN2 * ageHours) / SCORING.ENGAGEMENT_HALF_LIFE_HOURS,
         );
+
+        let replyPenalty = 0;
+        if (post.replyToId) {
+          const engagementRatio = Math.min(
+            1,
+            totalEngagement / SCORING.REPLY_ENGAGEMENT_THRESHOLD,
+          );
+          replyPenalty = SCORING.REPLY_PENALTY_BASE * (1 - engagementRatio);
+        }
+
         const score =
           SCORING.RECENCY_WEIGHT * recency +
-          SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay;
+          SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay -
+          replyPenalty;
 
         scoredPosts.push({ post, score, authorId: post.authorId });
       } catch {

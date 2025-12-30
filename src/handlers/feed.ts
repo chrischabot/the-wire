@@ -596,6 +596,8 @@ function scoreFeedPost(
 
   const recency = Math.exp((-LN2 * ageHours) / SCORING.RECENCY_HALF_LIFE_HOURS);
 
+  const totalEngagement =
+    (post.likeCount || 0) + (post.replyCount || 0) + (post.repostCount || 0);
   const engagement =
     (post.likeCount || 0) * SCORING.LIKE_WEIGHT +
     (post.replyCount || 0) * SCORING.REPLY_WEIGHT +
@@ -621,12 +623,22 @@ function scoreFeedPost(
   const frequency = authorFrequency.get(post.authorId) || 1;
   const frequencyPenalty = Math.min(15, (frequency - 1) * 2);
 
+  let replyPenalty = 0;
+  if (post.replyToId) {
+    const engagementRatio = Math.min(
+      1,
+      totalEngagement / SCORING.REPLY_ENGAGEMENT_THRESHOLD,
+    );
+    replyPenalty = SCORING.REPLY_PENALTY_BASE * (1 - engagementRatio);
+  }
+
   return (
     SCORING.RECENCY_WEIGHT * recency +
     SCORING.ENGAGEMENT_WEIGHT * engScore * engDecay +
     freshBoost -
     emptyRepostPenalty -
-    frequencyPenalty
+    frequencyPenalty -
+    replyPenalty
   );
 }
 
@@ -1264,7 +1276,7 @@ feed.get("/global", async (c) => {
     }
 
     if (cachedData) {
-      // Fast path: use cached full post data (no additional fetches needed)
+      // Use cached post data but ALWAYS re-score at read time for freshness
       const parsedPosts = safeJsonParse<PostMetadata[]>(cachedData);
       if (!parsedPosts) {
         return serverError("Error parsing cached data");
@@ -1278,8 +1290,19 @@ feed.get("/global", async (c) => {
       }
       cachedPosts = cachedPosts.filter((p) => !p.isDeleted && !p.isTakenDown);
 
-      const paginatedCached = cachedPosts.slice(offset, offset + limit);
-      const hasMore = offset + limit < cachedPosts.length;
+      // RE-SCORE at read time to ensure fresh posts bubble up
+      // The cron caches posts, but scores must be recalculated for accurate ranking
+      const scoredCached = cachedPosts.map((post) => ({
+        post,
+        score: calculateHNScore(post),
+      }));
+      scoredCached.sort((a, b) => b.score - a.score);
+
+      // Apply author diversity after re-scoring
+      const diverseCached = applyAuthorDiversity(scoredCached.map((sp) => sp.post));
+
+      const paginatedCached = diverseCached.slice(offset, offset + limit);
+      const hasMore = offset + limit < diverseCached.length;
       const nextCursor = hasMore ? btoa(String(offset + limit)) : null;
 
       const response = success({
