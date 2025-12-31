@@ -234,6 +234,7 @@ interface PostCardProps {
   showActions?: boolean;
   showMenu?: boolean;
   onDelete?: (postId: string) => void;
+  showParent?: boolean; // Show parent post for replies with connecting line
 }
 
 function arePropsEqual(prev: PostCardProps, next: PostCardProps): boolean {
@@ -247,7 +248,8 @@ function arePropsEqual(prev: PostCardProps, next: PostCardProps): boolean {
     p.hasLiked === n.hasLiked &&
     p.hasReposted === n.hasReposted &&
     prev.showActions === next.showActions &&
-    prev.showMenu === next.showMenu
+    prev.showMenu === next.showMenu &&
+    prev.showParent === next.showParent
   );
 }
 
@@ -256,6 +258,7 @@ export const PostCard = memo(function PostCard({
   showActions = true,
   showMenu = true,
   onDelete,
+  showParent = false,
 }: PostCardProps) {
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.user);
@@ -400,30 +403,50 @@ export const PostCard = memo(function PostCard({
   };
 
   const isReply = !!displayPost.replyToId && !isPureRepost;
+  const hasParentPost = isReply && post.parentPost;
+
+  // If showParent and we have parent data, render threaded view
+  if (showParent && hasParentPost) {
+    return (
+      <>
+        <div className="thread-container">
+          {/* Parent post with thread line */}
+          <div className="thread-parent">
+            <PostCard
+              post={post.parentPost!}
+              showActions={true}
+              showMenu={showMenu}
+              showParent={false}
+            />
+          </div>
+          {/* Reply post */}
+          <div className="thread-reply">
+            <PostCard
+              post={post}
+              showActions={showActions}
+              showMenu={showMenu}
+              showParent={false}
+              onDelete={onDelete}
+            />
+          </div>
+        </div>
+        {menuOpen && (
+          <div className="dropdown-backdrop" onClick={() => setMenuOpen(false)} />
+        )}
+        <ImageModal
+          src={modalImage}
+          alt="Post media"
+          onClose={() => setModalImage(null)}
+        />
+      </>
+    );
+  }
 
   return (
     <>
       {isPureRepost && (
         <div className="repost-indicator">
           <Repeat2 size={14} /> {post.authorDisplayName} reposted
-        </div>
-      )}
-      {isReply && (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-start",
-            paddingLeft: "39px",
-            height: "12px",
-          }}
-        >
-          <div
-            style={{
-              width: "2px",
-              height: "100%",
-              backgroundColor: "var(--border)",
-            }}
-          />
         </div>
       )}
       <div

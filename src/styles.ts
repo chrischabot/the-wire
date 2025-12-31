@@ -2161,7 +2161,7 @@ small {
   .sidebar-right {
     display: none;
   }
-  
+
   .twitter-layout {
     max-width: 920px;
   }
@@ -2171,9 +2171,72 @@ small {
   .sidebar-left {
     display: none;
   }
-  
+
   .twitter-layout {
     padding-bottom: 60px;
+  }
+
+  /* X.com mobile-optimized post cards */
+  .post-card {
+    padding: 12px 16px;
+  }
+
+  .post-header {
+    gap: 8px;
+  }
+
+  .avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .post-content {
+    font-size: 15px;
+    line-height: 20px;
+    margin-top: 2px;
+  }
+
+  .post-actions {
+    margin-top: 8px;
+    max-width: 100%;
+    justify-content: flex-start;
+    gap: 4px;
+  }
+
+  .post-action {
+    padding: 8px;
+    min-width: 50px;
+  }
+
+  .post-action svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Compose box mobile */
+  .compose-box {
+    padding: 12px 16px;
+  }
+
+  .compose-box textarea {
+    font-size: 17px;
+    min-height: 80px;
+  }
+
+  /* Page header mobile */
+  .page-header {
+    padding: 0 16px;
+    height: 53px;
+  }
+
+  .page-header h2 {
+    font-size: 20px;
+  }
+
+  /* Repost indicator mobile */
+  .repost-indicator {
+    padding: 8px 16px 0 60px;
+    font-size: 13px;
   }
 }
 
@@ -2196,7 +2259,7 @@ small {
     z-index: 50;
     padding-bottom: env(safe-area-inset-bottom);
   }
-  
+
   .bottom-nav-item {
     display: flex;
     align-items: center;
@@ -2207,17 +2270,69 @@ small {
     flex: 1;
     height: 100%;
   }
-  
+
   .bottom-nav-item svg {
     width: 26px;
     height: 26px;
   }
-  
+
   .bottom-nav .nav-icon-wrapper {
     position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+}
+
+/* ============================================
+   THREAD CONNECTOR - X.com style reply threading
+   ============================================ */
+.thread-container {
+  position: relative;
+}
+
+.thread-parent {
+  position: relative;
+}
+
+.thread-parent::after {
+  content: '';
+  position: absolute;
+  left: 36px;
+  top: 52px;
+  bottom: -12px;
+  width: 2px;
+  background: var(--border);
+}
+
+@media (max-width: 768px) {
+  .thread-parent::after {
+    left: 35px;
+    top: 52px;
+  }
+}
+
+.thread-reply {
+  position: relative;
+}
+
+.thread-reply .post-card {
+  border-top: none;
+}
+
+/* Thread line connecting replies */
+.reply-connector {
+  position: absolute;
+  left: 36px;
+  top: 0;
+  width: 2px;
+  height: 12px;
+  background: var(--border);
+}
+
+@media (max-width: 768px) {
+  .reply-connector {
+    left: 35px;
   }
 }
 

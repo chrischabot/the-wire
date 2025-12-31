@@ -58,6 +58,7 @@ export interface Post {
   hasLiked?: boolean;
   hasReposted?: boolean;
   originalPost?: Post;
+  parentPost?: Post; // For replies, the post being replied to (for thread display)
 }
 
 export interface Notification {

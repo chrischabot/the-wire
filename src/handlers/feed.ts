@@ -1149,6 +1149,28 @@ feed.get("/home-legacy", requireAuth, async (c) => {
       }),
     );
 
+    // Enrich replies with parent posts for thread display
+    const replyParentIds = postsWithInteractionStatus
+      .filter((p) => p.replyToId && !p.repostOfId)
+      .map((p) => p.replyToId!);
+
+    if (replyParentIds.length > 0) {
+      const parentMap = await batchKVGet<PostMetadata>(
+        c.env,
+        replyParentIds.map((id) => `post:${id}`),
+        "POSTS_KV",
+        { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+      );
+      for (const post of postsWithInteractionStatus) {
+        if (post.replyToId && !post.repostOfId) {
+          const parent = parentMap.get(`post:${post.replyToId}`);
+          if (parent && !parent.isDeleted && !parent.isTakenDown) {
+            post.parentPost = parent;
+          }
+        }
+      }
+    }
+
     return success({
       items: postsWithInteractionStatus,
       nextCursor: feedData.cursor,
@@ -1361,6 +1383,28 @@ feed.get("/global", async (c) => {
             post.originalPost.likeCount = freshOrig.likeCount;
             post.originalPost.replyCount = freshOrig.replyCount;
             post.originalPost.repostCount = freshOrig.repostCount;
+          }
+        }
+      }
+    }
+
+    // Enrich replies with parent posts for thread display (X.com style)
+    const replyParentIds = paginatedPosts
+      .filter((p) => p.replyToId && !p.repostOfId)
+      .map((p) => p.replyToId!);
+
+    if (replyParentIds.length > 0) {
+      const parentMap = await batchKVGet<PostMetadata>(
+        c.env,
+        replyParentIds.map((id) => `post:${id}`),
+        "POSTS_KV",
+        { parse: (v) => (v ? safeJsonParse<PostMetadata>(v) : null) },
+      );
+      for (const post of paginatedPosts) {
+        if (post.replyToId && !post.repostOfId) {
+          const parent = parentMap.get(`post:${post.replyToId}`);
+          if (parent && !parent.isDeleted && !parent.isTakenDown) {
+            post.parentPost = parent;
           }
         }
       }

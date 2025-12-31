@@ -38,6 +38,7 @@ export interface PostMetadata {
   content: string;
   mediaUrls: string[];
   replyToId?: string;
+  replyToHandle?: string;
   quoteOfId?: string;
   createdAt: number;
   likeCount: number;
@@ -57,6 +58,8 @@ export interface PostMetadata {
     replyCount?: number;
     repostCount?: number;
   };
+  // For thread display - the post this is replying to
+  parentPost?: PostMetadata;
   isDeleted?: boolean;
   deletedAt?: number;
   isTakenDown?: boolean;
