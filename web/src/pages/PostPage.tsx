@@ -9,6 +9,7 @@ import { AppLayout } from "../components/layout";
 import { PostCard, ComposeBox } from "../components/posts";
 import type { ComposeBoxRef } from "../components/posts";
 import { postsApi } from "../lib/api";
+import type { Post } from "../lib/api";
 import { useAuthStore } from "../stores/authStore";
 
 const styles = {
@@ -56,19 +57,23 @@ export function PostPage() {
   const [searchParams] = useSearchParams();
   const shouldFocusReply = searchParams.get("reply") === "true";
   const composeRef = useRef<ComposeBoxRef>(null);
+  const mainPostRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+  const hasScrolledRef = useRef(false);
 
+  // Fetch thread data (ancestors + main post + initial replies)
   const {
-    data: postData,
+    data: threadData,
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["post", id],
-    queryFn: () => postsApi.get(id!),
+    queryKey: ["thread", id],
+    queryFn: () => postsApi.getThread(id!),
     enabled: !!id,
   });
 
+  // Fetch paginated replies separately for infinite scroll
   const {
     data: repliesData,
     isLoading: isLoadingReplies,
@@ -86,7 +91,8 @@ export function PostPage() {
     enabled: !!id,
   });
 
-  const post = postData?.data;
+  const ancestors = threadData?.data?.ancestors ?? [];
+  const post = threadData?.data?.post;
   const replies =
     repliesData?.pages.flatMap((page) => page?.replies ?? []) ?? [];
 
@@ -107,9 +113,29 @@ export function PostPage() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
 
+  // Reset scroll tracking when post ID changes
   useEffect(() => {
-    window.scrollTo(0, 0);
+    hasScrolledRef.current = false;
   }, [id]);
+
+  // Auto-scroll to main post after ancestors load (X.com style)
+  useEffect(() => {
+    if (
+      !isLoading &&
+      post &&
+      ancestors.length > 0 &&
+      mainPostRef.current &&
+      !hasScrolledRef.current
+    ) {
+      // Small delay to let the DOM render
+      setTimeout(() => {
+        mainPostRef.current?.scrollIntoView({ behavior: "instant", block: "start" });
+        // Offset for the sticky header
+        window.scrollBy(0, -60);
+        hasScrolledRef.current = true;
+      }, 50);
+    }
+  }, [isLoading, post, ancestors.length]);
 
   useEffect(() => {
     if (shouldFocusReply && post && composeRef.current) {
@@ -119,7 +145,7 @@ export function PostPage() {
 
   const handleReplyCreated = () => {
     queryClient.invalidateQueries({ queryKey: ["replies", id] });
-    queryClient.invalidateQueries({ queryKey: ["post", id] });
+    queryClient.invalidateQueries({ queryKey: ["thread", id] });
   };
 
   const rightSidebar = (
@@ -169,7 +195,26 @@ export function PostPage() {
         <h2>Post</h2>
       </div>
 
-      <div style={styles.postDetail}>
+      {/* Ancestor posts (thread above) */}
+      {ancestors.length > 0 && (
+        <div className="thread-ancestors">
+          {ancestors.map((ancestor: Post, index: number) => (
+            <div
+              key={ancestor.id}
+              className={index < ancestors.length - 1 ? "thread-parent" : "thread-parent"}
+            >
+              <PostCard post={ancestor} showMenu={true} showActions={true} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Main post */}
+      <div
+        ref={mainPostRef}
+        style={styles.postDetail}
+        className={ancestors.length > 0 ? "thread-reply" : undefined}
+      >
         <PostCard post={post} showMenu={true} showActions={true} />
 
         {isAuthenticated ? (

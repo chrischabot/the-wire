@@ -342,6 +342,25 @@ export const postsApi = {
       hasMore: boolean;
     }>(url);
   },
+
+  async getThread(
+    postId: string,
+    limit = 20,
+  ): Promise<
+    ApiResponse<{
+      ancestors: Post[];
+      post: Post;
+      replies: Post[];
+      hasMoreReplies: boolean;
+    }>
+  > {
+    return await apiRequest<{
+      ancestors: Post[];
+      post: Post;
+      replies: Post[];
+      hasMoreReplies: boolean;
+    }>(`/posts/${postId}/thread?limit=${limit}`);
+  },
 };
 
 export const feedApi = {

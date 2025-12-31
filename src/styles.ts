@@ -2318,6 +2318,16 @@ small {
   }
 }
 
+/* Thread ancestors container (for PostPage view) */
+.thread-ancestors {
+  position: relative;
+}
+
+.thread-ancestors .thread-parent:last-child::after {
+  /* Extend line to connect to main post */
+  bottom: -32px;
+}
+
 .thread-reply {
   position: relative;
 }
