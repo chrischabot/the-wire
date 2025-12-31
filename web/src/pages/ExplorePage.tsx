@@ -162,7 +162,7 @@ export function ExplorePage() {
         )}
 
         {posts.map((post) => (
-          <PostCard key={post.id} post={post} />
+          <PostCard key={post.id} post={post} showParent={true} />
         ))}
 
         <div ref={loadMoreRef} style={{ height: 20 }} />

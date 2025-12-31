@@ -192,7 +192,7 @@ export function HomePage() {
         )}
 
         {posts.map((post) => (
-          <PostCard key={post.id} post={post} onDelete={handlePostDelete} />
+          <PostCard key={post.id} post={post} onDelete={handlePostDelete} showParent={true} />
         ))}
 
         <div ref={loadMoreRef} style={{ height: 20 }} />
