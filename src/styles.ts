@@ -2295,12 +2295,16 @@ small {
   position: relative;
 }
 
+.thread-parent .post-card {
+  border-bottom: none;
+}
+
 .thread-parent::after {
   content: '';
   position: absolute;
   left: 36px;
   top: 52px;
-  bottom: -12px;
+  bottom: 0;
   width: 2px;
   background: var(--border);
 }
