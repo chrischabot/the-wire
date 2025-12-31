@@ -2178,7 +2178,7 @@ small {
 
   /* X.com mobile-optimized post cards */
   .post-card {
-    padding: 12px 16px;
+    padding: 12px;
   }
 
   .post-header {
@@ -2312,7 +2312,7 @@ small {
 
 @media (max-width: 768px) {
   .thread-parent::after {
-    left: 36px;
+    left: 32px;
     top: 52px;
     bottom: -32px;
   }
