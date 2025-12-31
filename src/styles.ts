@@ -2303,41 +2303,23 @@ small {
   content: '';
   position: absolute;
   left: 36px;
-  top: 52px;
-  bottom: 0;
+  top: 64px;
+  bottom: -32px;
   width: 2px;
   background: var(--border);
+  z-index: 1;
 }
 
 @media (max-width: 768px) {
   .thread-parent::after {
-    left: 35px;
+    left: 36px;
     top: 52px;
+    bottom: -32px;
   }
 }
 
 .thread-reply {
   position: relative;
-}
-
-.thread-reply .post-card {
-  border-top: none;
-}
-
-/* Thread line connecting replies */
-.reply-connector {
-  position: absolute;
-  left: 36px;
-  top: 0;
-  width: 2px;
-  height: 12px;
-  background: var(--border);
-}
-
-@media (max-width: 768px) {
-  .reply-connector {
-    left: 35px;
-  }
 }
 
 /* ============================================
