@@ -137,6 +137,10 @@ Build the frontend once before running the tests, because `wrangler.toml` expect
 
 `src/index.ts` is the Worker entry point and Queue consumer, `src/durable-objects/` holds the four objects, `src/handlers/` the routes and cron jobs, `src/services/` the news job and notifications, and `web/` the React app. [`CLAUDE.md`](CLAUDE.md) is a longer guide to the codebase.
 
+## Project background
+
+- [The Wire project overview](https://chabot.dev/projects/#the-wire) on Chris Chabot’s site.
+
 ## License and credits
 
 MIT, see [LICENSE](LICENSE). Built by [Chris Chabot](https://github.com/chrischabot), working with the Maestro and Claude Code agents credited in the commit history. The interface follows Twitter/X's design, the themes draw on [shadcn/ui](https://ui.shadcn.com/), the routing uses [Hono](https://hono.dev/) and the icons come from [Lucide](https://lucide.dev/).
